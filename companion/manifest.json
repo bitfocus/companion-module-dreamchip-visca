@@ -1,0 +1,27 @@
+{
+  "id": "dct-visca",
+  "name": "dct-visca",
+  "shortname": "VISCA",
+  "description": "Control Dream Chip cameras over VISCA",
+  "version": "0.0.1",
+  "license": "MIT",
+  "repository": "https://gerrit.office.dreamchip.de/admin/repos/project/provideo/sw/companion-module-dct-visca",
+  "bugs": "https://gerrit.office.dreamchip.de/admin/repos/project/provideo/sw/companion-module-dct-visca",
+  "maintainers": [
+    {
+      "name": "Markus Loeffler",
+      "email": "markus.loeffler@dreamchip.de"
+    }
+  ],
+  "legacyIds": [],
+  "runtime": {
+    "type": "node22",
+    "api": "nodejs-ipc",
+    "apiVersion": "1.11.3",
+    "entrypoint": "../main.js",
+    "universal": true
+  },
+  "manufacturer": "Dream Chip Technologies",
+  "products": ["VISCA"],
+  "keywords": ["camera", "visca", "dct", "dreamchip", "provideo"]
+}

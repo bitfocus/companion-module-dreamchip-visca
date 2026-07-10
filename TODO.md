@@ -1,0 +1,56 @@
+# TODO
+
+## Before publishing to a public host
+
+Before publishing this module to an external / public host (e.g. GitHub or the
+Bitfocus module registry):
+
+- [ ] `companion/manifest.json` — replace the `repository` and `bugs` URLs
+      (currently the internal Gerrit) with the real public URLs.
+- [ ] `README.md` — remove the **Cloning** section (internal Gerrit clone URL and
+      the `dct hooks install` workflow).
+- [ ] Remove the **Command coverage** section below (internal firmware roadmap).
+
+## Command coverage (firmware follow-ups)
+
+Actions the module exposes that the camera firmware does not yet fully honour —
+they come back as "Command Not Executable". Each needs a VISCA→camera mapping
+added on the firmware side (and, where noted, a matching camera command).
+
+### Picture
+- [ ] **Gamma** (`cam_gamma`, `0x5B`) — no dedicated gamma command; map to the LUT
+      fixed-curve selector (BT.709 / HLG / PQ / S-Log3 → LUT index).
+- [ ] **Bright** up/down/reset + direct (`cam_bright`, `0x0D`) — map to `post_bright`.
+- [ ] **LR Reverse** (`0x61`) / **Picture Flip** (`0x66`) — map to the `flip` H/V bits.
+- [ ] **Flicker** (`cam_flicker`, `0x23`) — no camera flicker command; confirm whether
+      it can be supported at all.
+
+### System
+- [ ] **Settings Save** (`0xA5 0x10`) → `save_settings`.
+- [ ] **Settings Reset** (`0xA0 0x10`) → `reset_settings`.
+- [ ] **Memory** (`cam_memory`, `0x3F`) — recall / set / reset.
+
+### Video
+- [ ] **Video Mode dialect** — the module sends `04 24 00 00 b2 b3`; the firmware
+      currently only accepts the `04 24 72 …` (Tamron) dialect. Reconcile so the
+      documented dialect works.
+
+### Exposure
+- [ ] **Gain / Shutter** up/down + direct — full sensor gain/shutter mapping
+      (up/down need read-modify-write; requires the sensor-command firmware feature).
+- [ ] **AE Shutter-Priority** currently behaves like Full Auto — implement a real
+      shutter-priority path.
+
+### DCT extensions — deferred (VISCA payload doesn't match the camera command's args)
+- [ ] **knee** (enable + point + slope)
+- [ ] **lut_enable** (index + flag)
+- [ ] **mcc_set** (segment + saturation + hue)
+- [ ] **osd_color** (palette entry: id + alpha + y + cb + cr)
+- [ ] **status_led** (brightness % vs r/g/b)
+- [ ] **timecode** (hh:mm:ss vs + frames)
+- [ ] **Calibrate DCT value scaling** — currently identity placeholders for black
+      levels, flare, S-Log3, PQ, SDI, audio gain and green gain.
+
+### Build / feature dependent (work on real hardware, not the native simulator)
+- [ ] **Power On/Off** (`cam_power`) → `low_power` — present on real builds only.
+- [ ] **Flip** *set* — not modelled on the simulator (the inquiry works).

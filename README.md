@@ -1,52 +1,68 @@
-# Bitfocus Companion (v4) module for controlling Dream Chip cameras over VISCA
+# companion-module-dct-visca
 
+A Bitfocus Companion v4 module to control Dream Chip cameras over **VISCA**.
+It sends VISCA commands as raw bytes over TCP and reads camera state back via
+VISCA inquiries.
 
-[TOC]
+Supported: the standard VISCA camera set — system/power, exposure (AE, gain,
+shutter), white balance (+ red/blue/colour gains), picture (gamma, brightness,
+contrast, flip/mirror), video mode, flicker, memory, settings save/reset — plus
+Dream Chip vendor extensions (green gain, gain mode, black levels, flare, AWB
+speed, S-Log3 gain, colour space, tone-mapping/PQ, noise reduction,
+detail/denoise, LUT mode/preset, SDI range/levels, MCC op-mode, OSD, audio,
+timecode hold). Pan/tilt/zoom/focus are out of scope.
 
+## Requirements
 
-## DEAR PROJECT ADMIN,
+- Bitfocus Companion **v4.x**
+- A Dream Chip camera reachable over **TCP** that accepts VISCA (default port `4000`)
 
-**PLEASE REMOVE THIS WHOLE SECTION AFTER UNDERSTANDING IT!**
+## Configuration
 
-This is the initial `README.md`.
+In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
 
-As requested in [DCTGIT-541](https://jira.dreamchip.de/jira/browse/DCTGIT-541), this is a fresh repository with some
-**initial defaults** chosen by you and the Git admin team:
+| Field | Description |
+|---|---|
+| **Target IP** | The camera's IP address |
+| **TCP port** | VISCA TCP port (default `4000`) |
+| **Camera address** | VISCA address `1`–`7` (default `1`) |
+| **Poll ms** | Read-back polling interval in ms; `0` = off (send-only). Set it >0 (e.g. `2000`) to keep variables and feedbacks live |
 
-* The central repository is called `project/provideo/sw/companion-module-dct-visca` and is
-  [served](https://gerrit.office.dreamchip.de/admin/repos/project/provideo/sw/companion-module-dct-visca,branches) by a Gerrit instance.
-* This `README.md` is a skeleton for your project; see
-  [`CONTRIBUTING.md`](CONTRIBUTING.md) for syntax details.
-* `main` will be the default if `git clone` is called without option `--branch`.
-* [Some](https://gerrit.office.dreamchip.de/plugins/gitiles/it/git/user/+/refs/heads/main/doc/policy.md)
-  branches, e.g. `main`, are usually protected by Gerrit-based
-  reviews. They must not be pushed to directly.
-* Other branches are usually configured less strictly.
+## What it exposes
 
-**THE FOLLOWING SECTIONS ARE FOR THE USERS OF YOUR REPOSITORY!**
+- **Actions** — one per command:
+  - enum commands → a dropdown (e.g. AE Mode, White Balance, Gamma, Flip),
+  - reset/up/down commands → a dropdown (Gain, Shutter, Red/Blue Gain, Bright),
+  - "direct" commands → a numeric value input,
+  - fixed commands → IF Clear, Settings Save/Reset,
+  - Video Mode → a mode dropdown, plus "Poll inquiries now".
+- **Presets** — a button per command choice, grouped by category (System, Power,
+  Exposure, White Balance, Picture, Video, and the Dream Chip extension groups).
+- **Variables** — one per inquiry, updated by the poller, e.g. `$(visca:wb_mode)`,
+  `$(visca:ae_mode)`, `$(visca:gain)`, `$(visca:version)`. The prefix is your
+  connection's label.
+- **Feedbacks** — "AE mode is …", "WB mode is …" (tint the active-mode button) and
+  "Connection OK".
 
-
-## Setup
-
-### DCT
-
-For the initial setup of your Git and Gerrit configuration, refer to the
-[user manual](https://gerrit.office.dreamchip.de/plugins/gitiles/it/git/user/+/refs/heads/main/README.md).
+## Cloning
 
 ```sh
 git clone ssh://gerrit.office.dreamchip.de:29418/project/provideo/sw/companion-module-dct-visca project/provideo/sw/companion-module-dct-visca
 git -C project/provideo/sw/companion-module-dct-visca dct hooks install
 ```
 
-[`CONTRIBUTING.md`](CONTRIBUTING.md) documents how to make changes to files
-available for (other) project members.
+`main` is review-protected — submit changes via `refs/for/main`. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+## Development
 
-## Build, Deploy & Test
+```sh
+npm install     # or: pnpm install
+```
 
-...
+In the Companion launcher, set the **Developer modules path** to the folder
+containing this module and restart, then add the connection as described above.
 
+## License
 
-## FAQ
-
-...
+MIT
