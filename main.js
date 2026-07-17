@@ -18,11 +18,89 @@ class DctViscaInstance extends InstanceBase {
 		this.setupFeedbacks()
 		this.setupVariables()
 		this.setupPresets()
-		this.initTCP()
+		await this.initTransport()
 		this.startPolling()
 	}
 
 	// --- transport ---------------------------------------------------------
+	async initTransport() {
+		if (this.config?.conn === 'serial') {
+			await this.initSerial()
+		} else {
+			this.initTCP()
+		}
+	}
+
+	async initSerial() {
+		if (this.socket) {
+			this.socket.destroy()
+			this.socket = undefined
+		}
+		const path = this.config?.serialPort
+		const baudRate = Number(this.config?.baud) || 115200
+		if (!path) {
+			this.updateStatus(InstanceStatus.BadConfig, 'No serial port')
+			return
+		}
+		// Loaded lazily so a missing/broken native binding never breaks TCP users.
+		let SerialPort
+		try {
+			;({ SerialPort } = await import('serialport'))
+		} catch (err) {
+			this.updateStatus(InstanceStatus.ConnectionFailure, 'serialport not available')
+			this.log('error', `serialport import failed: ${err.message}`)
+			return
+		}
+		this.updateStatus(InstanceStatus.Connecting)
+		const port = new SerialPort({ path, baudRate, dataBits: 8, parity: 'none', stopBits: 1, autoOpen: false })
+		// Adapt the SerialPort to the small interface pump()/pollOnce()/feedbacks use.
+		this.socket = {
+			isConnected: false,
+			send: (buf) => {
+				try {
+					port.write(Buffer.from(buf))
+				} catch (err) {
+					this.log('error', `serial write: ${err.message}`)
+				}
+			},
+			destroy: () => {
+				try {
+					if (port.isOpen) port.close(() => {})
+				} catch (_) {
+					// ignore
+				}
+			},
+		}
+		port.on('open', () => {
+			// Half-duplex RS-485 adapters need DTR+RTS asserted or TX never reaches the camera.
+			try {
+				port.set({ dtr: true, rts: true }, () => {})
+			} catch (_) {
+				// ignore
+			}
+			this.socket.isConnected = true
+			this.updateStatus(InstanceStatus.Ok)
+			this.checkFeedbacks('connected')
+			this.pump()
+		})
+		port.on('data', (chunk) => this.onData(chunk))
+		port.on('close', () => {
+			if (this.socket) this.socket.isConnected = false
+			this.updateStatus(InstanceStatus.Disconnected)
+			this.checkFeedbacks('connected')
+		})
+		port.on('error', (err) => {
+			this.log('error', `serial error: ${err.message}`)
+			this.updateStatus(InstanceStatus.ConnectionFailure, err.message)
+		})
+		port.open((err) => {
+			if (err) {
+				this.log('error', `serial open: ${err.message}`)
+				this.updateStatus(InstanceStatus.ConnectionFailure, err.message)
+			}
+		})
+	}
+
 	initTCP() {
 		if (this.socket) {
 			this.socket.destroy()
@@ -213,9 +291,12 @@ class DctViscaInstance extends InstanceBase {
 	// --- lifecycle ---------------------------------------------------------
 	getConfigFields() {
 		return [
-			{ type: 'static-text', id: 'info', width: 12, label: 'DCT VISCA', value: 'Raw VISCA over TCP. Set the camera IP and VISCA TCP port (default 4000).' },
-			{ type: 'textinput', id: 'host', label: 'Target IP', width: 5, default: '127.0.0.1', regex: Regex.IP },
-			{ type: 'number', id: 'port', label: 'TCP port', width: 3, default: 4000, min: 1, max: 65535 },
+			{ type: 'static-text', id: 'info', width: 12, label: 'DCT VISCA', value: 'Raw VISCA over TCP or serial (RS-485/RS-232). For serial, run Companion on the machine wired to the camera.' },
+			{ type: 'dropdown', id: 'conn', label: 'Connection', width: 4, default: 'tcp', choices: [{ id: 'tcp', label: 'TCP' }, { id: 'serial', label: 'Serial (COM)' }] },
+			{ type: 'textinput', id: 'host', label: 'Target IP', width: 5, default: '127.0.0.1', regex: Regex.IP, isVisible: (c) => c.conn !== 'serial' },
+			{ type: 'number', id: 'port', label: 'TCP port', width: 3, default: 4000, min: 1, max: 65535, isVisible: (c) => c.conn !== 'serial' },
+			{ type: 'textinput', id: 'serialPort', label: 'Serial port (e.g. COM3 or /dev/ttyUSB0)', width: 5, default: 'COM3', isVisible: (c) => c.conn === 'serial' },
+			{ type: 'number', id: 'baud', label: 'Baud', width: 3, default: 115200, min: 300, max: 3000000, isVisible: (c) => c.conn === 'serial' },
 			{ type: 'number', id: 'address', label: 'Camera address (1-7)', width: 2, default: 1, min: 1, max: 7 },
 			{ type: 'number', id: 'pollInterval', label: 'Poll ms (0=off)', width: 2, default: 0, min: 0, max: 60000 },
 		]
@@ -223,7 +304,7 @@ class DctViscaInstance extends InstanceBase {
 
 	async configUpdated(config) {
 		this.config = config
-		this.initTCP()
+		await this.initTransport()
 		this.startPolling()
 	}
 
