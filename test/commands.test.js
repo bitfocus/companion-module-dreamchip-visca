@@ -19,6 +19,7 @@ import {
 	decodeNibbles,
 	buildFrame,
 	decodeReply,
+	continuousParams,
 } from '../commands.js'
 
 const isByte = (b) => Number.isInteger(b) && b >= 0 && b <= 0xff
@@ -167,6 +168,42 @@ test('SYSTEM video-mode table is well-formed and reversible via decodeReply', ()
 
 test('RUD action bytes', () => {
 	assert.deepEqual(RUD, { reset: 0x00, up: 0x02, down: 0x03 })
+})
+
+// --- continuous (knob) params ----------------------------------------------
+test('continuousParams cover every direct command and map to a real inquiry variable', () => {
+	const params = continuousParams()
+	const varIds = new Set(Object.values(INQUIRIES).map((q) => q.varId))
+	const directIds = Object.entries(COMMANDS)
+		.filter(([, c]) => c.kind === 'direct')
+		.map(([id]) => id)
+	assert.equal(params.length, directIds.length, 'one knob param per direct command')
+
+	const seen = new Set()
+	for (const p of params) {
+		assert.ok(!seen.has(p.id), `${p.id}: duplicate`)
+		seen.add(p.id)
+		assert.equal(COMMANDS[p.cmd]?.kind, 'direct', `${p.id}: cmd is a direct command`)
+		assert.ok(varIds.has(p.varId), `${p.id}: varId '${p.varId}' has no matching inquiry`)
+		assert.ok([1, 2].includes(p.nibbles), `${p.id}: nibbles`)
+		assert.equal(p.max, (1 << (4 * p.nibbles)) - 1, `${p.id}: max derived from nibbles`)
+	}
+})
+
+test('a continuous param builds the expected absolute-set frame', () => {
+	const params = continuousParams()
+	const gain = params.find((p) => p.varId === 'gain')
+	const cg = COMMANDS[gain.cmd]
+	assert.deepEqual(
+		[...buildFrame(1, [...cg.prefix, ...encodeNibbles(42, cg.nibbles)])],
+		[0x81, 0x01, 0x04, 0x4c, 0x00, 0x00, 0x02, 0x0a, 0xff], // gain = 42 (0x2a)
+	)
+	const gg = params.find((p) => p.varId === 'dct_ggain')
+	const cgg = COMMANDS[gg.cmd]
+	assert.deepEqual(
+		[...buildFrame(1, [...cgg.prefix, ...encodeNibbles(0xff, cgg.nibbles)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x01, 0x00, 0x00, 0x0f, 0x0f, 0xff], // green gain = 255
+	)
 })
 
 // --- end-to-end frame shape (buildFrame + table) ---------------------------

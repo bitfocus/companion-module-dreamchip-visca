@@ -1,5 +1,5 @@
 import { InstanceBase, InstanceStatus, Regex, TCPHelper, runEntrypoint, combineRgb } from '@companion-module/base'
-import { COMMANDS, INQUIRIES, ENUM, SYSTEM, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame } from './commands.js'
+import { COMMANDS, INQUIRIES, ENUM, SYSTEM, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams } from './commands.js'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
 const GREEN = combineRgb(0, 102, 0)
@@ -13,6 +13,9 @@ class DctViscaInstance extends InstanceBase {
 		this.queue = [] // { frame, onReply, timer }
 		this.inflight = null
 		this.rxbuf = Buffer.alloc(0)
+		this.knob = {} // per-varId knob target (relative-adjust state)
+		this.params = continuousParams()
+		this.paramById = Object.fromEntries(this.params.map((p) => [p.id, p]))
 
 		this.setupActions()
 		this.setupFeedbacks()
@@ -175,6 +178,32 @@ class DctViscaInstance extends InstanceBase {
 		this.enqueue(buildFrame(this.config?.address || 1, payload))
 	}
 
+	// --- knobs (relative adjust of continuous params) ----------------------
+	knobStep() {
+		const n = Number(this.config?.knobStep)
+		return Number.isFinite(n) && n > 0 ? n : 4
+	}
+
+	readValue(varId) {
+		if (this.knob[varId] !== undefined) return this.knob[varId]
+		const n = parseInt(this.state[varId], 10)
+		return Number.isFinite(n) ? n : 0
+	}
+
+	// Rotary-knob adjust: clamp, send an absolute `direct` set for the param, and
+	// optimistically update its value variable so the encoder LCD tracks live.
+	adjustParam(paramId, delta) {
+		const p = this.paramById?.[paramId]
+		if (!p || !Number.isFinite(delta)) return
+		const next = Math.max(0, Math.min(p.max, this.readValue(p.varId) + delta))
+		this.knob[p.varId] = next
+		const c = COMMANDS[p.cmd]
+		this.send([...c.prefix, ...encodeNibbles(next, c.nibbles)])
+		this.state[p.varId] = String(next)
+		this.setVariableValues({ [p.varId]: String(next) })
+		this.checkFeedbacks('knob_value')
+	}
+
 	// --- actions -----------------------------------------------------------
 	setupActions() {
 		const actions = {}
@@ -202,6 +231,15 @@ class DctViscaInstance extends InstanceBase {
 				}
 			}
 			actions[id] = a
+		}
+		const params = this.params
+		actions['adjust'] = {
+			name: 'Knob: Adjust value (relative)',
+			options: [
+				{ type: 'dropdown', id: 'param', label: 'Parameter', default: params[0]?.id, choices: params.map((p) => ({ id: p.id, label: `${p.group}: ${p.name}` })) },
+				{ type: 'number', id: 'step', label: 'Step (may be negative)', default: this.knobStep(), min: -255, max: 255 },
+			],
+			callback: (ev) => this.adjustParam(ev.options.param, Number(ev.options.step)),
 		}
 		actions['poll_now'] = { name: 'System: Poll inquiries now', options: [], callback: () => this.pollOnce() }
 		this.setActionDefinitions(actions)
@@ -231,6 +269,26 @@ class DctViscaInstance extends InstanceBase {
 				presets[id] = btn(c.group, c.name, c.name.replace(/ /g, '\\n'), id, {})
 			}
 		}
+		// Rotary-encoder (Stream Deck+) knobs: turn = adjust +/- step, press = sync.
+		for (const p of this.params) {
+			const step = p.max <= 15 ? 1 : this.knobStep()
+			presets[`knob_${p.id}`] = {
+				type: 'button',
+				category: `Knobs: ${p.group}`,
+				name: `${p.name} (knob)`,
+				options: { rotaryActions: true },
+				style: { text: p.name, size: 'auto', color: WHITE, bgcolor: BLUE },
+				steps: [
+					{
+						down: [{ actionId: 'poll_now', options: {} }],
+						up: [],
+						rotate_right: [{ actionId: 'adjust', options: { param: p.id, step } }],
+						rotate_left: [{ actionId: 'adjust', options: { param: p.id, step: -step } }],
+					},
+				],
+				feedbacks: [{ feedbackId: 'knob_value', options: { param: p.id } }],
+			}
+		}
 		this.setPresetDefinitions(presets)
 	}
 
@@ -257,6 +315,19 @@ class DctViscaInstance extends InstanceBase {
 				options: [],
 				callback: () => this.socket?.isConnected === true,
 			},
+			knob_value: {
+				type: 'advanced',
+				name: 'Knob: show current value',
+				options: [
+					{ type: 'dropdown', id: 'param', label: 'Parameter', default: this.params[0]?.id, choices: this.params.map((p) => ({ id: p.id, label: `${p.group}: ${p.name}` })) },
+				],
+				callback: (fb) => {
+					const p = this.paramById?.[fb.options.param]
+					if (!p) return {}
+					const v = this.state[p.varId]
+					return { text: `${p.name}\\n${v ?? '--'}`, size: 'auto' }
+				},
+			},
 		})
 	}
 
@@ -282,8 +353,14 @@ class DctViscaInstance extends InstanceBase {
 				if (kind === 0x50) value = decodeReply(q.decode, reply.subarray(2, reply.length - 1))
 				this.state[q.varId] = value
 				this.setVariableValues({ [q.varId]: value })
+				// Re-sync the knob target to the camera's real value (numeric params).
+				if (q.decode.type === 'value') {
+					const n = parseInt(value, 10)
+					if (Number.isFinite(n)) this.knob[q.varId] = n
+				}
 				if (q.varId === 'ae_mode') this.checkFeedbacks('ae_mode_is')
 				if (q.varId === 'wb_mode') this.checkFeedbacks('wb_mode_is')
+				this.checkFeedbacks('knob_value')
 			})
 		}
 	}
@@ -299,6 +376,7 @@ class DctViscaInstance extends InstanceBase {
 			{ type: 'number', id: 'baud', label: 'Baud', width: 3, default: 115200, min: 300, max: 3000000, isVisible: (c) => c.conn === 'serial' },
 			{ type: 'number', id: 'address', label: 'Camera address (1-7)', width: 2, default: 1, min: 1, max: 7 },
 			{ type: 'number', id: 'pollInterval', label: 'Poll ms (0=off)', width: 2, default: 0, min: 0, max: 60000 },
+			{ type: 'number', id: 'knobStep', label: 'Knob step (0-255 params)', width: 3, default: 4, min: 1, max: 128 },
 		]
 	}
 

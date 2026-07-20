@@ -259,3 +259,27 @@ export const INQUIRIES = {
 
 // RUD action byte per choice.
 export const RUD = { reset: 0x00, up: 0x02, down: 0x03 }
+
+// Continuous (knob-able) parameters, derived from the `direct` commands. Each
+// entry gives the absolute-set command id (`cmd`), the value variable shown on
+// the encoder LCD / read for the current value (`varId`, from INQUIRIES), and the
+// value range (`max`, from `nibbles`). The rotary presets and the relative
+// Adjust action are generated from this list. varId rule: strip a trailing
+// `_direct`, then drop a leading `cam_` (dct_* ids equal their inquiry varId).
+export function continuousParams() {
+	return Object.entries(COMMANDS)
+		.filter(([, c]) => c.kind === 'direct')
+		.map(([id, c]) => {
+			const base = id.endsWith('_direct') ? id.slice(0, -'_direct'.length) : id
+			const varId = base.startsWith('cam_') ? base.slice(4) : base
+			return {
+				id,
+				cmd: id,
+				varId,
+				name: c.name.replace(/ \(direct\)$/, ''),
+				group: c.group,
+				nibbles: c.nibbles,
+				max: (1 << (4 * c.nibbles)) - 1,
+			}
+		})
+}
