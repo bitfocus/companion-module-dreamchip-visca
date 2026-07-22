@@ -8,11 +8,16 @@
 // Entry shape:
 //   cmd    - the ProVideo command name, or null if there's no real mapping
 //            (protocol-only, or simply unimplemented in the current firmware)
-//   scaled - true if firmware applies its own placeholder value scaling
-//            (map_gain/unmap_gain/map_exposure/ggain_map, all marked "TODO
-//            stage 8: calibrate" in the BSP) before this reaches the sensor —
-//            we deliberately do NOT re-implement that math here, since it's
-//            expected to change independently of this tool.
+//   scaled - true if the raw VISCA value isn't the literal ProVideo argument —
+//            currently always a documented linear scale across a real,
+//            known min-max range (see each entry's `note`: cam_gain
+//            1000-22858, cam_exposure 100-38339us). We deliberately do NOT
+//            re-implement that scaling math here, since it lives in and can
+//            change independently of this tool.
+//            gain_red/gain_blue/gain_green are NOT in this category: their
+//            VISCA encoding was widened to 3 nibbles to exactly represent
+//            ISP_AWB_GAIN_MAX (0-4095), so the wire value already equals the
+//            real ProVideo argument (scaled: false).
 //   note   - shown verbatim instead of a value, for protocol-only/unimplemented
 //            entries or other caveats worth surfacing.
 //   rud    - for `kind:'rud'` COMMANDS entries: which of reset/up/down actually
@@ -29,11 +34,27 @@ export const PROVIDEO_NAMES = {
 	cam_ae: { choices: { 'Full Auto': 'aec 1', Manual: 'aec 0', 'Shutter Pri': 'aec 1' } },
 	ae_mode: { cmd: 'aec', scaled: false, note: 'readback: aec!=0 -> Full Auto, else Manual (Shutter Pri is not distinguishable on readback)' },
 	cam_gain: { cmd: 'cam_gain', rud: { reset: 'cam_gain 1000', up: null, down: null } },
-	cam_gain_direct: { cmd: 'cam_gain', scaled: true },
-	gain: { cmd: 'cam_gain', scaled: true },
+	cam_gain_direct: {
+		cmd: 'cam_gain',
+		scaled: true,
+		note: 'real range is 1000-22858 (1x/0dB/140 ISO .. 22x/13.6dB/3200 ISO); raw is 0-4095, linearly scaled, not a placeholder',
+	},
+	gain: {
+		cmd: 'cam_gain',
+		scaled: true,
+		note: 'real range is 1000-22858 (1x/0dB/140 ISO .. 22x/13.6dB/3200 ISO); raw is 0-4095, linearly scaled, not a placeholder',
+	},
 	cam_shutter: { cmd: 'cam_exposure', rud: { reset: 'cam_exposure 10000', up: null, down: null } },
-	cam_shutter_direct: { cmd: 'cam_exposure', scaled: true },
-	shutter: { cmd: 'cam_exposure', scaled: true },
+	cam_shutter_direct: {
+		cmd: 'cam_exposure',
+		scaled: true,
+		note: 'real range is 100-38339us (observed on real hardware); raw is 0-4095, linearly scaled, not a placeholder',
+	},
+	shutter: {
+		cmd: 'cam_exposure',
+		scaled: true,
+		note: 'real range is 100-38339us (observed on real hardware); raw is 0-4095, linearly scaled, not a placeholder',
+	},
 
 	// --- category 0x04 white balance (visca_map_wb.c) -----------------------
 	// cam_wb is one COMMANDS entry with several choices, each landing on a
@@ -46,12 +67,12 @@ export const PROVIDEO_NAMES = {
 		},
 	},
 	wb_mode: { cmd: 'awb', scaled: false, note: 'readback only distinguishes Auto/Manual, not preset/trigger detail' },
-	cam_rgain: { cmd: 'gain_red', rud: { reset: 'gain_red 1000', up: 'read-modify-write (+step)', down: 'read-modify-write (-step)' } },
-	cam_rgain_direct: { cmd: 'gain_red', scaled: true },
-	rgain: { cmd: 'gain_red', scaled: true },
-	cam_bgain: { cmd: 'gain_blue', rud: { reset: 'gain_blue 1000', up: 'read-modify-write (+step)', down: 'read-modify-write (-step)' } },
-	cam_bgain_direct: { cmd: 'gain_blue', scaled: true },
-	bgain: { cmd: 'gain_blue', scaled: true },
+	cam_rgain: { cmd: 'gain_red', rud: { reset: 'gain_red 512', up: 'read-modify-write (+step)', down: 'read-modify-write (-step)' } },
+	cam_rgain_direct: { cmd: 'gain_red', scaled: false },
+	rgain: { cmd: 'gain_red', scaled: false },
+	cam_bgain: { cmd: 'gain_blue', rud: { reset: 'gain_blue 512', up: 'read-modify-write (+step)', down: 'read-modify-write (-step)' } },
+	cam_bgain_direct: { cmd: 'gain_blue', scaled: false },
+	bgain: { cmd: 'gain_blue', scaled: false },
 
 	// --- category 0x04 picture (visca_map_picture.c) — raw passthrough, no scaler
 	cam_color_gain_direct: { cmd: 'post_sat', scaled: false },
@@ -91,13 +112,25 @@ export const PROVIDEO_NAMES = {
 	// Table-driven 1:1 mappings; raw decoded value == the ProVideo argument,
 	// no scaling — full confidence. Green gain (SS 0x01) is the one bespoke
 	// exception: it scales like the standard-category gains.
-	dct_ggain: { cmd: 'gain_green', choices: { Reset: 'gain_green 1000', Up: 'read-modify-write (+step)', Down: 'read-modify-write (-step)' } },
-	dct_ggain_direct: { cmd: 'gain_green', scaled: true },
+	dct_ggain: { cmd: 'gain_green', choices: { Reset: 'gain_green 512', Up: 'read-modify-write (+step)', Down: 'read-modify-write (-step)' } },
+	dct_ggain_direct: { cmd: 'gain_green', scaled: false },
 	dct_gain_mode: { cmd: 'gain_mode', scaled: false },
 	dct_black_master: { cmd: 'black_master', scaled: false },
-	dct_black_red: { cmd: 'black_red', scaled: false },
-	dct_black_green: { cmd: 'black_green', scaled: false },
-	dct_black_blue: { cmd: 'black_blue', scaled: false },
+	dct_black_red: {
+		cmd: 'black_red',
+		scaled: true,
+		note: 'real range is signed -4096..4095 (ISP_BLS_MIN/MAX); raw is signed -2048..2047, firmware doubles it (x2)',
+	},
+	dct_black_green: {
+		cmd: 'black_green',
+		scaled: true,
+		note: 'real range is signed -4096..4095 (ISP_BLS_MIN/MAX); raw is signed -2048..2047, firmware doubles it (x2)',
+	},
+	dct_black_blue: {
+		cmd: 'black_blue',
+		scaled: true,
+		note: 'real range is signed -4096..4095 (ISP_BLS_MIN/MAX); raw is signed -2048..2047, firmware doubles it (x2)',
+	},
 	dct_flare: { cmd: 'flare', scaled: false },
 	dct_awb_speed: { cmd: 'awb_speed', scaled: false },
 	dct_slog3_gain: { cmd: 'slog3_master_gain', scaled: false },
@@ -106,11 +139,19 @@ export const PROVIDEO_NAMES = {
 	dct_dpf_enable: { cmd: 'dpf_enable', scaled: false },
 	dct_dpf_strength: { cmd: 'dpf_strength', scaled: false },
 	dct_filter_enable: { cmd: 'filter_enable', scaled: false },
-	dct_filter_detail: { cmd: 'filter_detail', scaled: false },
+	dct_filter_detail: {
+		cmd: 'filter_detail',
+		scaled: true,
+		note: 'real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring',
+	},
 	dct_filter_denoise: { cmd: 'filter_denoise', scaled: false },
 	dct_color_space: { cmd: 'color_space', scaled: false },
 	dct_tm_mode: { cmd: 'tm_mode', scaled: false },
-	dct_pq_max_bright: { cmd: 'pq_max_brightness', scaled: false },
+	dct_pq_max_bright: {
+		cmd: 'pq_max_brightness',
+		scaled: true,
+		note: 'real range is 100-10000 cd/m2 (do_pq_max_brightness); raw is 0-4095, linearly scaled, not a placeholder',
+	},
 	dct_mcc_opmode: { cmd: 'mcc_opmode', scaled: false },
 	dct_lut_mode: { cmd: 'lut_mode', scaled: false },
 	dct_lut_fixed_mode: { cmd: 'lut_fixed_mode', scaled: false },
@@ -120,7 +161,11 @@ export const PROVIDEO_NAMES = {
 	dct_sdi_white: { cmd: 'sdi_white', scaled: false },
 	dct_osd: { cmd: 'osd', scaled: false },
 	dct_audio_enable: { cmd: 'audio_enable', scaled: false },
-	dct_audio_gain: { cmd: 'audio_gain', scaled: false },
+	dct_audio_gain: {
+		cmd: 'audio_gain',
+		scaled: true,
+		note: 'real range is 0-65535 (4.12 fixed-point, 4096 = 1.0x unity gain); raw is 0-4095, firmware multiplies it by 16',
+	},
 	dct_auto_save: { cmd: 'auto_save', scaled: false },
 	dct_timecode_hold: { cmd: 'timecode_hold', scaled: false },
 }

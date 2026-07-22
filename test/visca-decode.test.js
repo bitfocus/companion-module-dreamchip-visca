@@ -47,10 +47,44 @@ test('DCT-ext inquiry + successful reply decodes the value and names the ProVide
 })
 
 test('standard-category direct-set (Gain) reports the raw value with a scaling caveat', () => {
-	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x4c, 0x00, 0x00, ...encodeNibbles(42, 2)])))
+	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x4c, 0x00, 0x00, ...encodeNibbles(42, 3)])))
 	assert.match(entries[0].companion, /Gain \(direct\) = 42/)
 	assert.match(entries[0].provideo, /^cam_gain <raw=42>/)
-	assert.match(entries[0].provideo, /firmware applies its own scaling/)
+	assert.match(entries[0].provideo, /real range is 1000-22858/)
+})
+
+test('signed direct-set (Color Hue) decodes the wire byte as negative, not as its raw unsigned value', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x4f, 0x00, 0x00, ...encodeNibbles(-5 & 0xff, 2)])))
+	assert.match(entries[0].companion, /Color Hue \(direct\) = -5/)
+	assert.equal(entries[0].provideo, 'post_hue -5')
+})
+
+test('signed inquiry reply (Color Hue) decodes the wire byte as negative', () => {
+	const lines = parseLines(`${tx([0x09, 0x04, 0x4f])}\n${rx([0x50, ...encodeNibbles(-5 & 0xff, 2)])}`)
+	const entries = decodeDump(lines)
+	assert.match(entries[1].companion, /Color Hue = -5/)
+	assert.equal(entries[1].provideo, 'post_hue')
+})
+
+test('signed + scaled direct-set (Black Red) shows the signed raw value with an x2 scaling caveat', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x04, ...encodeNibbles(-500 & 0xfff, 3)])))
+	assert.match(entries[0].companion, /Black Red = -500/)
+	assert.match(entries[0].provideo, /^black_red <raw=-500>/)
+	assert.match(entries[0].provideo, /firmware doubles it \(x2\)/)
+})
+
+test('DCT-ext direct-set (Filter Detail) flags the firmware clamp for raw values above its real max', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x15, ...encodeNibbles(200, 2)])))
+	assert.match(entries[0].companion, /Filter Detail = 200/)
+	assert.match(entries[0].provideo, /^filter_detail <raw=200>/)
+	assert.match(entries[0].provideo, /clamps raw values above 31 to 31/)
+})
+
+test('DCT-ext direct-set (Audio Gain) shows the raw value with an x16 scaling caveat', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x66, ...encodeNibbles(256, 3)])))
+	assert.match(entries[0].companion, /Audio Gain = 256/)
+	assert.match(entries[0].provideo, /^audio_gain <raw=256>/)
+	assert.match(entries[0].provideo, /firmware multiplies it by 16/)
 })
 
 test('rud command (Gain reset) is a real firmware command; up/down are not implemented', () => {

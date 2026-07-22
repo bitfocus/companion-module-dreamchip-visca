@@ -8,7 +8,7 @@
 // Bare hex lines (no "TX "/"RX " prefix) are also accepted; direction is then
 // inferred from the frame's type/kind byte.
 import { readFileSync } from 'node:fs'
-import { COMMANDS, INQUIRIES, RUD, SYSTEM, TERMINATOR, decodeNibbles, decodeReply } from '../commands.js'
+import { COMMANDS, INQUIRIES, RUD, SYSTEM, TERMINATOR, decodeNibbles, decodeReply, toSigned } from '../commands.js'
 import { PROVIDEO_NAMES } from './provideo-names.mjs'
 
 const ERROR_CODES = {
@@ -56,7 +56,8 @@ export function matchCommand(payload) {
 			if (action) return { id, kind: 'rud', action }
 		}
 		if (c.kind === 'direct' && payload.length === c.prefix.length + c.nibbles && eq(payload.slice(0, c.prefix.length), c.prefix)) {
-			return { id, kind: 'direct', value: decodeNibbles(payload.slice(c.prefix.length)) }
+			const raw = decodeNibbles(payload.slice(c.prefix.length))
+			return { id, kind: 'direct', value: c.signed ? toSigned(raw, c.nibbles) : raw }
 		}
 		if (c.kind === 'video' && payload.length === 7 && eq(payload.slice(0, 5), [0x01, 0x04, 0x24, 0x00, 0x00])) {
 			const [b2, b3] = payload.slice(5)
@@ -103,7 +104,7 @@ export function translate(m) {
 	}
 	if (m.kind === 'direct') {
 		if (!p.cmd) return p.note ?? '(no ProVideo mapping known)'
-		return p.scaled ? `${p.cmd} <raw=${m.value}>  // firmware applies its own scaling (TODO stage 8) before this reaches the sensor` : `${p.cmd} ${m.value}`
+		return p.scaled ? `${p.cmd} <raw=${m.value}>  // ${p.note ?? 'firmware applies its own scaling (TODO stage 8) before this reaches the sensor'}` : `${p.cmd} ${m.value}`
 	}
 	if (m.kind === 'fixed' || m.kind === 'video') return p.note ?? (p.cmd ? p.cmd : '(no ProVideo mapping known)')
 	return p.note ?? (p.cmd ? `${p.cmd}${p.scaled ? ' <raw value>' : ''}` : '(no ProVideo mapping known)')
@@ -164,7 +165,7 @@ export function decodeDump(lines) {
 				if (!p || (!p.cmd && !p.note)) provideo = '(no ProVideo mapping known)'
 				else if (!p.cmd) provideo = p.note
 				else if (p.scaled && q.decode.type === 'value')
-					provideo = `${p.cmd} <raw=${label}>  // firmware applies its own scaling (TODO stage 8) before this reaches the sensor`
+					provideo = `${p.cmd} <raw=${label}>  // ${p.note ?? 'firmware applies its own scaling (TODO stage 8) before this reaches the sensor'}`
 				else provideo = p.cmd
 				out.push({ dir: 'RX', raw: bytes, companion: `${q.name} = ${label}`, provideo })
 				pending = null

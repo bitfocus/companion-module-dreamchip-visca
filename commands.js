@@ -53,6 +53,13 @@ export function decodeNibbles(bytes) {
 	for (const b of bytes) v = (v << 4) | (b & 0x0f)
 	return v
 }
+// Reinterpret an unsigned nibble-decoded value as two's-complement signed
+// (e.g. post_hue's -128..127 is wire-encoded as an unsigned byte via the same
+// 2-nibble encoding as any other value, then reinterpreted on decode).
+export function toSigned(raw, nibbles) {
+	const half = 1 << (4 * nibbles - 1)
+	return raw >= half ? raw - half * 2 : raw
+}
 export function buildFrame(address, payload) {
 	return Buffer.from([0x80 | (address & 0x0f), ...payload, TERMINATOR])
 }
@@ -64,8 +71,10 @@ export function decodeReply(decode, payload) {
 			if (!payload.length) return '?'
 			return decode.map[payload[0]] ?? '0x' + payload[0].toString(16).padStart(2, '0')
 		}
-		case 'value':
-			return String(decodeNibbles(payload))
+		case 'value': {
+			const raw = decodeNibbles(payload)
+			return String(decode.signed ? toSigned(raw, payload.length) : raw)
+		}
 		case 'system': {
 			if (payload.length >= 4) {
 				const vm = SYSTEM_INQ[`${payload[2]},${payload[3]}`]
@@ -105,9 +114,13 @@ export const COMMANDS = {
 		choices: { 'Full Auto': P(0x01, 0x04, 0x39, 0x00), Manual: P(0x01, 0x04, 0x39, 0x03), 'Shutter Pri': P(0x01, 0x04, 0x39, 0x0a) },
 	},
 	cam_gain: { name: 'Gain', group: 'Exposure', kind: 'rud', func: 0x0c },
-	cam_gain_direct: { name: 'Gain (direct)', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00), nibbles: 2 },
+	// cam_gain's real range is 1000-22858 (1x/0dB/140 ISO to 22x/13.6dB/3200 ISO);
+	// widened to 3 nibbles (0-4095) for ~5.3 gain units per step, matching the BSP.
+	cam_gain_direct: { name: 'Gain (direct)', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00), nibbles: 3 },
 	cam_shutter: { name: 'Shutter', group: 'Exposure', kind: 'rud', func: 0x0a },
-	cam_shutter_direct: { name: 'Shutter (direct)', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x04, 0x4a, 0x00, 0x00), nibbles: 2 },
+	// cam_exposure's real range is 100-38339us (observed on real hardware);
+	// widened to 3 nibbles (0-4095) for ~9.3us per step, matching the BSP.
+	cam_shutter_direct: { name: 'Shutter (direct)', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x04, 0x4a, 0x00, 0x00), nibbles: 3 },
 	cam_flicker: {
 		name: 'Flicker', group: 'Exposure', kind: 'enum',
 		choices: { Off: P(0x01, 0x04, 0x23, 0x00), '50Hz': P(0x01, 0x04, 0x23, 0x01), '60Hz': P(0x01, 0x04, 0x23, 0x02) },
@@ -123,11 +136,19 @@ export const COMMANDS = {
 		},
 	},
 	cam_rgain: { name: 'Red Gain', group: 'White Balance', kind: 'rud', func: 0x03 },
-	cam_rgain_direct: { name: 'Red Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x43, 0x00, 0x00), nibbles: 2 },
+	// gain_red's real range is 0-4095 (ISP_AWB_GAIN_MAX); widened to 3 nibbles
+	// so the wire encoding represents it exactly, matching the BSP fix.
+	cam_rgain_direct: { name: 'Red Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x43, 0x00, 0x00), nibbles: 3 },
 	cam_bgain: { name: 'Blue Gain', group: 'White Balance', kind: 'rud', func: 0x04 },
-	cam_bgain_direct: { name: 'Blue Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x44, 0x00, 0x00), nibbles: 2 },
-	cam_color_gain_direct: { name: 'Color Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x49, 0x00, 0x00, 0x00), nibbles: 1 },
-	cam_color_hue_direct: { name: 'Color Hue (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x4f, 0x00, 0x00, 0x00), nibbles: 1 },
+	// gain_blue's real range is 0-4095 (ISP_AWB_GAIN_MAX); widened to 3 nibbles.
+	cam_bgain_direct: { name: 'Blue Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x44, 0x00, 0x00), nibbles: 3 },
+	// post_sat's real range is 0-255 (ISP_CCOR12_SATURATION_MAX in the BSP); the
+	// VISCA wire format is widened to 2 nibbles to match, in step with the same
+	// fix in visca_map_picture.c.
+	cam_color_gain_direct: { name: 'Color Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x49, 0x00, 0x00), nibbles: 2 },
+	// post_hue's real range is signed -128..127 (ISP_CCOR12_HUE_MIN/MAX); wire
+	// format widened from 1 nibble (unsigned 0-15, couldn't go negative at all).
+	cam_color_hue_direct: { name: 'Color Hue (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x4f, 0x00, 0x00), nibbles: 2, signed: true },
 
 	// Picture
 	cam_gamma: {
@@ -157,23 +178,36 @@ export const COMMANDS = {
 		name: 'Green Gain', group: 'DCT Gain', kind: 'enum',
 		choices: { Reset: P(0x01, 0x7e, 0x01, 0x01, 0x00), Up: P(0x01, 0x7e, 0x01, 0x01, 0x02), Down: P(0x01, 0x7e, 0x01, 0x01, 0x03) },
 	},
-	dct_ggain_direct: { name: 'Green Gain (direct)', group: 'DCT Gain', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x01, 0x00, 0x00), nibbles: 2 },
+	// gain_green's real range is 0-4095 (ISP_AWB_GAIN_MAX); widened to 3 nibbles.
+	dct_ggain_direct: { name: 'Green Gain (direct)', group: 'DCT Gain', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x01, 0x00, 0x00), nibbles: 3 },
 	dct_gain_mode: {
 		name: 'Gain Mode', group: 'DCT Gain', kind: 'enum',
 		choices: { Auto: P(0x01, 0x7e, 0x01, 0x02, 0x00), LCG: P(0x01, 0x7e, 0x01, 0x02, 0x01), HCG: P(0x01, 0x7e, 0x01, 0x02, 0x02) },
 	},
 
-	dct_black_master: { name: 'Black Master', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x03), nibbles: 2 },
-	dct_black_red: { name: 'Black Red', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x04), nibbles: 2 },
-	dct_black_green: { name: 'Black Green', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x05), nibbles: 2 },
-	dct_black_blue: { name: 'Black Blue', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x06), nibbles: 2 },
+	// black_master's real range is signed -2048..2047 (ISP_BMST_OFFSET_MIN/MAX,
+	// a signed 12-bit value); widened to 3 nibbles to represent it exactly.
+	dct_black_master: { name: 'Black Master', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x03), nibbles: 3, signed: true },
+	// black_red/green/blue's real range is signed -4096..4095 (ISP_BLS_MIN/MAX);
+	// kept at 3 nibbles (signed 12-bit, -2048..2047) with firmware scaling by 2
+	// to cover -4096..4094 -- odd values and 4095 itself are unreachable, an
+	// accepted precision tradeoff.
+	dct_black_red: { name: 'Black Red', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x04), nibbles: 3, signed: true },
+	dct_black_green: { name: 'Black Green', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x05), nibbles: 3, signed: true },
+	dct_black_blue: { name: 'Black Blue', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x06), nibbles: 3, signed: true },
 
-	dct_flare: { name: 'Flare', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x07), nibbles: 2 },
+	// flare's real range is 0-65535 (ISP_BLS_FLARE_MIN/MAX); widened to 4
+	// nibbles to represent it exactly, matching the BSP. Sets the same value
+	// for all three channels (VISCA has no separate red/green/blue sub-opcode
+	// for it, unlike black_red/green/blue).
+	dct_flare: { name: 'Flare', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x07), nibbles: 4 },
 	dct_awb_speed: { name: 'AWB Speed', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x08), nibbles: 1 },
 	dct_slog3_gain: { name: 'S-Log3 Master Gain', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x09), nibbles: 2 },
 	dct_color_space: { name: 'Color Space', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x17), nibbles: 1 },
 	dct_tm_mode: { name: 'Tone-Mapping Mode', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x21), nibbles: 1 },
-	dct_pq_max_bright: { name: 'PQ Max Brightness', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x22), nibbles: 2 },
+	// pq_max_brightness's real range is 100-10000 cd/m2 (do_pq_max_brightness);
+	// widened to 3 nibbles (0-4095) for ~2.4 cd/m2 per step, matching the BSP.
+	dct_pq_max_bright: { name: 'PQ Max Brightness', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x22), nibbles: 3 },
 	dct_mcc_opmode: { name: 'MCC Op-Mode', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x40), nibbles: 1 },
 
 	dct_cnr_auto: { name: 'CNR Auto', group: 'DCT Detail/NR', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x11, 0x00), On: P(0x01, 0x7e, 0x01, 0x11, 0x01) } },
@@ -181,8 +215,13 @@ export const COMMANDS = {
 	dct_dpf_enable: { name: 'DPF Enable', group: 'DCT Detail/NR', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x12, 0x00), On: P(0x01, 0x7e, 0x01, 0x12, 0x01) } },
 	dct_dpf_strength: { name: 'DPF Strength', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x13), nibbles: 1 },
 	dct_filter_enable: { name: 'Filter Enable', group: 'DCT Detail/NR', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x14, 0x00), On: P(0x01, 0x7e, 0x01, 0x14, 0x01) } },
-	dct_filter_detail: { name: 'Filter Detail', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x15), nibbles: 1 },
-	dct_filter_denoise: { name: 'Filter Denoise', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x16), nibbles: 1 },
+	// real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL, firmware hard-rejects >=32);
+	// wire stays 2 nibbles (0-255, same as filter_denoise's real 0-255), but
+	// firmware now clamps raw values above 31 to 31 instead of erroring.
+	dct_filter_detail: { name: 'Filter Detail', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x15), nibbles: 2 },
+	// real range is 0-255 (ISP_FLT_MAX_DENOISE_LVL); 1 nibble truncated it,
+	// widened to 2 nibbles to match it exactly.
+	dct_filter_denoise: { name: 'Filter Denoise', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x16), nibbles: 2 },
 
 	dct_lut_mode: { name: 'LUT Mode', group: 'DCT LUT', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x24), nibbles: 1 },
 	dct_lut_fixed_mode: { name: 'LUT Fixed Mode', group: 'DCT LUT', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x25), nibbles: 1 },
@@ -194,7 +233,10 @@ export const COMMANDS = {
 
 	dct_osd: { name: 'OSD', group: 'DCT OSD/Audio', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x52, 0x00), On: P(0x01, 0x7e, 0x01, 0x52, 0x01) } },
 	dct_audio_enable: { name: 'Audio Enable', group: 'DCT OSD/Audio', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x65, 0x00), On: P(0x01, 0x7e, 0x01, 0x65, 0x01) } },
-	dct_audio_gain: { name: 'Audio Gain', group: 'DCT OSD/Audio', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x66), nibbles: 2 },
+	// audio_gain's real range is 0-65535 (4.12 fixed-point, 4096 = 1.0x unity
+	// gain); kept at 3 nibbles (0-4095) with firmware scaling by 16 to cover
+	// 0-65520 -- the top 15 values are unreachable, an accepted tradeoff.
+	dct_audio_gain: { name: 'Audio Gain', group: 'DCT OSD/Audio', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x66), nibbles: 3 },
 
 	dct_auto_save: { name: 'Auto Save', group: 'DCT System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x62, 0x00), On: P(0x01, 0x7e, 0x01, 0x62, 0x01) } },
 	dct_timecode_hold: { name: 'Timecode Hold', group: 'DCT System', kind: 'enum', choices: { Run: P(0x01, 0x7e, 0x01, 0x64, 0x00), Hold: P(0x01, 0x7e, 0x01, 0x64, 0x01) } },
@@ -213,7 +255,7 @@ export const INQUIRIES = {
 	bgain: { name: 'Blue Gain', varId: 'bgain', payload: P(0x09, 0x04, 0x44), decode: { type: 'value' } },
 	color_temp: { name: 'Color Temp', varId: 'color_temp', payload: P(0x09, 0x04, 0x20), decode: { type: 'value' } },
 	color_gain: { name: 'Color Gain', varId: 'color_gain', payload: P(0x09, 0x04, 0x49), decode: { type: 'value' } },
-	color_hue: { name: 'Color Hue', varId: 'color_hue', payload: P(0x09, 0x04, 0x4f), decode: { type: 'value' } },
+	color_hue: { name: 'Color Hue', varId: 'color_hue', payload: P(0x09, 0x04, 0x4f), decode: { type: 'value', signed: true } },
 	gamma: { name: 'Gamma', varId: 'gamma', payload: P(0x09, 0x04, 0x5b), decode: { type: 'enum', map: ENUM.gamma } },
 	bright: { name: 'Bright', varId: 'bright', payload: P(0x09, 0x04, 0x4d), decode: { type: 'value' } },
 	brightness: { name: 'Brightness', varId: 'brightness', payload: P(0x09, 0x04, 0xa1), decode: { type: 'value' } },
@@ -226,10 +268,10 @@ export const INQUIRIES = {
 	// DCT vendor extensions (09 7E 01 SS)
 	dct_ggain: { name: 'Green Gain', varId: 'dct_ggain', payload: P(0x09, 0x7e, 0x01, 0x01), decode: { type: 'value' } },
 	dct_gain_mode: { name: 'Gain Mode', varId: 'dct_gain_mode', payload: P(0x09, 0x7e, 0x01, 0x02), decode: { type: 'enum', map: ENUM.dct_gain_mode } },
-	dct_black_master: { name: 'Black Master', varId: 'dct_black_master', payload: P(0x09, 0x7e, 0x01, 0x03), decode: { type: 'value' } },
-	dct_black_red: { name: 'Black Red', varId: 'dct_black_red', payload: P(0x09, 0x7e, 0x01, 0x04), decode: { type: 'value' } },
-	dct_black_green: { name: 'Black Green', varId: 'dct_black_green', payload: P(0x09, 0x7e, 0x01, 0x05), decode: { type: 'value' } },
-	dct_black_blue: { name: 'Black Blue', varId: 'dct_black_blue', payload: P(0x09, 0x7e, 0x01, 0x06), decode: { type: 'value' } },
+	dct_black_master: { name: 'Black Master', varId: 'dct_black_master', payload: P(0x09, 0x7e, 0x01, 0x03), decode: { type: 'value', signed: true } },
+	dct_black_red: { name: 'Black Red', varId: 'dct_black_red', payload: P(0x09, 0x7e, 0x01, 0x04), decode: { type: 'value', signed: true } },
+	dct_black_green: { name: 'Black Green', varId: 'dct_black_green', payload: P(0x09, 0x7e, 0x01, 0x05), decode: { type: 'value', signed: true } },
+	dct_black_blue: { name: 'Black Blue', varId: 'dct_black_blue', payload: P(0x09, 0x7e, 0x01, 0x06), decode: { type: 'value', signed: true } },
 	dct_flare: { name: 'Flare', varId: 'dct_flare', payload: P(0x09, 0x7e, 0x01, 0x07), decode: { type: 'value' } },
 	dct_awb_speed: { name: 'AWB Speed', varId: 'dct_awb_speed', payload: P(0x09, 0x7e, 0x01, 0x08), decode: { type: 'value' } },
 	dct_slog3_gain: { name: 'S-Log3 Master Gain', varId: 'dct_slog3_gain', payload: P(0x09, 0x7e, 0x01, 0x09), decode: { type: 'value' } },
@@ -272,6 +314,7 @@ export function continuousParams() {
 		.map(([id, c]) => {
 			const base = id.endsWith('_direct') ? id.slice(0, -'_direct'.length) : id
 			const varId = base.startsWith('cam_') ? base.slice(4) : base
+			const bits = 4 * c.nibbles
 			return {
 				id,
 				cmd: id,
@@ -279,7 +322,9 @@ export function continuousParams() {
 				name: c.name.replace(/ \(direct\)$/, ''),
 				group: c.group,
 				nibbles: c.nibbles,
-				max: (1 << (4 * c.nibbles)) - 1,
+				signed: !!c.signed,
+				min: c.signed ? -(1 << (bits - 1)) : 0,
+				max: c.signed ? (1 << (bits - 1)) - 1 : (1 << bits) - 1,
 			}
 		})
 }

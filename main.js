@@ -195,7 +195,7 @@ class DctViscaInstance extends InstanceBase {
 	adjustParam(paramId, delta) {
 		const p = this.paramById?.[paramId]
 		if (!p || !Number.isFinite(delta)) return
-		const next = Math.max(0, Math.min(p.max, this.readValue(p.varId) + delta))
+		const next = Math.max(p.min, Math.min(p.max, this.readValue(p.varId) + delta))
 		this.knob[p.varId] = next
 		const c = COMMANDS[p.cmd]
 		this.send([...c.prefix, ...encodeNibbles(next, c.nibbles)])
@@ -217,9 +217,12 @@ class DctViscaInstance extends InstanceBase {
 				a.options = [{ type: 'dropdown', id: 'choice', label: 'Action', default: 'up', choices: Object.keys(RUD).map((x) => ({ id: x, label: x })) }]
 				a.callback = (ev) => this.send([0x01, 0x04, c.func, RUD[ev.options.choice]])
 			} else if (c.kind === 'direct') {
-				const max = (1 << (4 * c.nibbles)) - 1
-				a.options = [{ type: 'number', id: 'value', label: `Value (0-${max})`, default: 0, min: 0, max }]
-				a.callback = (ev) => this.send([...c.prefix, ...encodeNibbles(Number(ev.options.value) & max, c.nibbles)])
+				const bits = 4 * c.nibbles
+				const max = c.signed ? (1 << (bits - 1)) - 1 : (1 << bits) - 1
+				const min = c.signed ? -(1 << (bits - 1)) : 0
+				const mask = (1 << bits) - 1
+				a.options = [{ type: 'number', id: 'value', label: `Value (${min}-${max})`, default: 0, min, max }]
+				a.callback = (ev) => this.send([...c.prefix, ...encodeNibbles(Number(ev.options.value) & mask, c.nibbles)])
 			} else if (c.kind === 'fixed') {
 				a.callback = () => this.send(c.bytes)
 			} else if (c.kind === 'video') {

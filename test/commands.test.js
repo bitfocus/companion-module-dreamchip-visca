@@ -20,6 +20,7 @@ import {
 	buildFrame,
 	decodeReply,
 	continuousParams,
+	toSigned,
 } from '../commands.js'
 
 const isByte = (b) => Number.isInteger(b) && b >= 0 && b <= 0xff
@@ -95,7 +96,7 @@ test('every COMMANDS entry is well-formed', () => {
 		} else if (c.kind === 'direct') {
 			assert.ok(Array.isArray(c.prefix) && c.prefix.every(isByte), `${id}: prefix`)
 			assert.equal(c.prefix[0], 0x01, `${id}: not a command (0x01)`)
-			assert.ok([1, 2].includes(c.nibbles), `${id}: nibbles must be 1 or 2`)
+			assert.ok([1, 2, 3, 4].includes(c.nibbles), `${id}: nibbles must be 1-4`)
 		} else if (c.kind === 'fixed') {
 			assert.ok(Array.isArray(c.bytes) && c.bytes.every(isByte), `${id}: bytes`)
 			assert.equal(c.bytes[0], 0x01, `${id}: not a command (0x01)`)
@@ -185,8 +186,12 @@ test('continuousParams cover every direct command and map to a real inquiry vari
 		seen.add(p.id)
 		assert.equal(COMMANDS[p.cmd]?.kind, 'direct', `${p.id}: cmd is a direct command`)
 		assert.ok(varIds.has(p.varId), `${p.id}: varId '${p.varId}' has no matching inquiry`)
-		assert.ok([1, 2].includes(p.nibbles), `${p.id}: nibbles`)
-		assert.equal(p.max, (1 << (4 * p.nibbles)) - 1, `${p.id}: max derived from nibbles`)
+		assert.ok([1, 2, 3, 4].includes(p.nibbles), `${p.id}: nibbles`)
+		const bits = 4 * p.nibbles
+		const expectedMax = p.signed ? (1 << (bits - 1)) - 1 : (1 << bits) - 1
+		const expectedMin = p.signed ? -(1 << (bits - 1)) : 0
+		assert.equal(p.max, expectedMax, `${p.id}: max derived from nibbles/signed`)
+		assert.equal(p.min, expectedMin, `${p.id}: min derived from nibbles/signed`)
 	}
 })
 
@@ -196,13 +201,13 @@ test('a continuous param builds the expected absolute-set frame', () => {
 	const cg = COMMANDS[gain.cmd]
 	assert.deepEqual(
 		[...buildFrame(1, [...cg.prefix, ...encodeNibbles(42, cg.nibbles)])],
-		[0x81, 0x01, 0x04, 0x4c, 0x00, 0x00, 0x02, 0x0a, 0xff], // gain = 42 (0x2a)
+		[0x81, 0x01, 0x04, 0x4c, 0x00, 0x00, 0x00, 0x02, 0x0a, 0xff], // gain = 42 (0x02a)
 	)
 	const gg = params.find((p) => p.varId === 'dct_ggain')
 	const cgg = COMMANDS[gg.cmd]
 	assert.deepEqual(
-		[...buildFrame(1, [...cgg.prefix, ...encodeNibbles(0xff, cgg.nibbles)])],
-		[0x81, 0x01, 0x7e, 0x01, 0x01, 0x00, 0x00, 0x0f, 0x0f, 0xff], // green gain = 255
+		[...buildFrame(1, [...cgg.prefix, ...encodeNibbles(4095, cgg.nibbles)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x01, 0x00, 0x00, 0x0f, 0x0f, 0x0f, 0xff], // green gain = 4095 (ISP_AWB_GAIN_MAX)
 	)
 })
 
@@ -213,8 +218,80 @@ test('representative frames build to the exact bytes', () => {
 		[0x81, 0x01, 0x04, 0x39, 0x00, 0xff],
 	)
 	assert.deepEqual(
-		[...buildFrame(1, [...COMMANDS.dct_black_master.prefix, ...encodeNibbles(0x12, 2)])],
-		[0x81, 0x01, 0x7e, 0x01, 0x03, 0x01, 0x02, 0xff],
+		[...buildFrame(1, [...COMMANDS.dct_black_master.prefix, ...encodeNibbles(0x12, COMMANDS.dct_black_master.nibbles)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x03, 0x00, 0x01, 0x02, 0xff],
 	)
 	assert.deepEqual([...buildFrame(1, INQUIRIES.dct_filter_enable.payload)], [0x81, 0x09, 0x7e, 0x01, 0x14, 0xff])
+})
+
+test('Color Gain (direct) uses 2 nibbles for its full 0-255 range (post_sat)', () => {
+	// Widened from 1 nibble (0-15) to match post_sat's real ISP_CCOR12_SATURATION_MAX
+	// range and the inquiry side, which already replies 2 nibbles via reply_pq.
+	assert.equal(COMMANDS.cam_color_gain_direct.nibbles, 2)
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.cam_color_gain_direct.prefix, ...encodeNibbles(255, 2)])],
+		[0x81, 0x01, 0x04, 0x49, 0x00, 0x00, 0x0f, 0x0f, 0xff],
+	)
+})
+
+test('toSigned reinterprets a 2-nibble byte as two\'s-complement int8', () => {
+	assert.equal(toSigned(0, 2), 0)
+	assert.equal(toSigned(127, 2), 127)
+	assert.equal(toSigned(128, 2), -128)
+	assert.equal(toSigned(251, 2), -5)
+	assert.equal(toSigned(255, 2), -1)
+})
+
+test('Color Hue (direct) is signed, -128..127, wire-encoded like any other 2-nibble value', () => {
+	// post_hue's real range is signed -128..127 (ISP_CCOR12_HUE_MIN/MAX); widened
+	// from 1 nibble (unsigned 0-15, couldn't represent negative hue at all).
+	assert.equal(COMMANDS.cam_color_hue_direct.nibbles, 2)
+	assert.equal(COMMANDS.cam_color_hue_direct.signed, true)
+	// -5 as an 8-bit two's-complement value is 0xFB -> nibbles [0xF, 0xB]
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.cam_color_hue_direct.prefix, ...encodeNibbles(-5 & 0xff, 2)])],
+		[0x81, 0x01, 0x04, 0x4f, 0x00, 0x00, 0x0f, 0x0b, 0xff],
+	)
+})
+
+test('decodeReply reinterprets a signed value decode as negative', () => {
+	assert.equal(decodeReply({ type: 'value', signed: true }, [0x0f, 0x0b]), '-5')
+	assert.equal(decodeReply({ type: 'value', signed: true }, [0x00, 0x00]), '0')
+	assert.equal(decodeReply({ type: 'value' }, [0x0f, 0x0b]), '251', 'non-signed decode is unaffected')
+})
+
+test("continuousParams' Color Hue entry has a signed -128..127 range", () => {
+	const hue = continuousParams().find((p) => p.id === 'cam_color_hue_direct')
+	assert.equal(hue.signed, true)
+	assert.equal(hue.min, -128)
+	assert.equal(hue.max, 127)
+})
+
+test('Black Master (direct) is signed, -2048..2047, an exact 12-bit fit (3 nibbles)', () => {
+	// ISP_BMST_OFFSET_MIN/MAX; widened from 2 nibbles (unsigned 0-255) to 3
+	// nibbles to represent the full signed 12-bit range exactly.
+	assert.equal(COMMANDS.dct_black_master.nibbles, 3)
+	assert.equal(COMMANDS.dct_black_master.signed, true)
+	// -500 as a 12-bit two's-complement value is 0xE0C -> nibbles [0xE, 0x0, 0xC]
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.dct_black_master.prefix, ...encodeNibbles(-500 & 0xfff, 3)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x03, 0x0e, 0x00, 0x0c, 0xff],
+	)
+})
+
+test("continuousParams' Black Master entry has a signed -2048..2047 range", () => {
+	const bm = continuousParams().find((p) => p.id === 'dct_black_master')
+	assert.equal(bm.signed, true)
+	assert.equal(bm.min, -2048)
+	assert.equal(bm.max, 2047)
+})
+
+test('Flare (direct) uses 4 nibbles for its full 0-65535 range, an exact fit', () => {
+	// ISP_BLS_FLARE_MIN/MAX; widened from 2 nibbles (0-255), which badly
+	// truncated it, to 4 nibbles -- 65535 == 2^16-1, an exact identity mapping.
+	assert.equal(COMMANDS.dct_flare.nibbles, 4)
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.dct_flare.prefix, ...encodeNibbles(65535, 4)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x07, 0x0f, 0x0f, 0x0f, 0x0f, 0xff],
+	)
 })
