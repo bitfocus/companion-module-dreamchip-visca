@@ -50,7 +50,7 @@ test('standard-category direct-set (Gain) reports the raw value with a scaling c
 	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x4c, 0x00, 0x00, ...encodeNibbles(42, 3)])))
 	assert.match(entries[0].companion, /Gain \(direct\) = 42/)
 	assert.match(entries[0].provideo, /^cam_gain <raw=42>/)
-	assert.match(entries[0].provideo, /real range is 1000-22858/)
+	assert.match(entries[0].provideo, /real range is 1000-45715/)
 })
 
 test('signed direct-set (Color Hue) decodes the wire byte as negative, not as its raw unsigned value', () => {
@@ -87,12 +87,91 @@ test('DCT-ext direct-set (Audio Gain) shows the raw value with an x16 scaling ca
 	assert.match(entries[0].provideo, /firmware multiplies it by 16/)
 })
 
-test('rud command (Gain reset) is a real firmware command; up/down are not implemented', () => {
+test('DCT-ext direct-set (AEC SetPoint) reports the raw value with a read-modify-write caveat', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x18, ...encodeNibbles(857, 3)])))
+	assert.match(entries[0].companion, /AEC SetPoint = 857/)
+	assert.match(entries[0].provideo, /^aec <raw=857>/)
+	assert.match(entries[0].provideo, /positional arg 2 \(setPoint\), real range 50-3000/)
+	assert.match(entries[0].provideo, /read-modify-write of all 10 args/)
+})
+
+test('DCT-ext direct-set (AEC Speed) reports the raw value with a read-modify-write caveat', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x19, ...encodeNibbles(26, 2)])))
+	assert.match(entries[0].companion, /AEC Speed = 26/)
+	assert.match(entries[0].provideo, /^aec <raw=26>/)
+	assert.match(entries[0].provideo, /positional arg 3 \(speed\), real range 1-30/)
+	assert.match(entries[0].provideo, /read-modify-write of all 10 args/)
+})
+
+test('DCT-ext direct-set (AEC Max Gain) reports the raw value with a read-modify-write caveat', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x1a, ...encodeNibbles(4095, 3)])))
+	assert.match(entries[0].companion, /AEC Max Gain = 4095/)
+	assert.match(entries[0].provideo, /^aec <raw=4095>/)
+	assert.match(entries[0].provideo, /positional arg 9 \(maxGain\), real range 1000-45715/)
+	assert.match(entries[0].provideo, /read-modify-write of all 10 args/)
+})
+
+test('DCT-ext direct-set (Flare Red) reports the raw value with a read-modify-write caveat', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x07, ...encodeNibbles(300, 3)])))
+	assert.match(entries[0].companion, /Flare Red = 300/)
+	assert.match(entries[0].provideo, /^flare <raw=300>/)
+	assert.match(entries[0].provideo, /positional arg 1 \(red\), real range 0-65535/)
+	assert.match(entries[0].provideo, /read-modify-write of all 3 args/)
+	assert.match(entries[0].provideo, /firmware multiplies it by 16/)
+})
+
+test('DCT-ext direct-set (Flare Green) reports the raw value with a read-modify-write caveat', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x1b, ...encodeNibbles(4095, 3)])))
+	assert.match(entries[0].companion, /Flare Green = 4095/)
+	assert.match(entries[0].provideo, /^flare <raw=4095>/)
+	assert.match(entries[0].provideo, /positional arg 2 \(green\), real range 0-65535/)
+	assert.match(entries[0].provideo, /read-modify-write of all 3 args/)
+})
+
+test('DCT-ext direct-set (Flare Blue) reports the raw value with a read-modify-write caveat', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x1c, ...encodeNibbles(0, 3)])))
+	assert.match(entries[0].companion, /Flare Blue = 0/)
+	assert.match(entries[0].provideo, /^flare <raw=0>/)
+	assert.match(entries[0].provideo, /positional arg 3 \(blue\), real range 0-65535/)
+	assert.match(entries[0].provideo, /read-modify-write of all 3 args/)
+})
+
+test('DCT-ext enum command (SDI Range) maps 0->Legal, 1->Full, matching do_sdi_range\'s own help text', () => {
+	const legal = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x30, 0x00])))
+	assert.match(legal[0].companion, /SDI Range = Legal/)
+	assert.equal(legal[0].provideo, 'sdi_range 0')
+
+	const full = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x30, 0x01])))
+	assert.match(full[0].companion, /SDI Range = Full/)
+	assert.equal(full[0].provideo, 'sdi_range 1')
+})
+
+test("Green Gain reset targets 256 (unity), not 512 like red/blue's reset", () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x01, 0x00])))
+	assert.match(entries[0].companion, /Green Gain = Reset/)
+	assert.equal(entries[0].provideo, 'gain_green 256')
+})
+
+test('rud command (Gain) supports the full Reset/Up/Down structure via firmware read-modify-write', () => {
 	const reset = decodeDump(parseLines(tx([0x01, 0x04, 0x0c, 0x00])))
 	assert.equal(reset[0].provideo, 'cam_gain 1000')
 
 	const up = decodeDump(parseLines(tx([0x01, 0x04, 0x0c, 0x02])))
-	assert.match(up[0].provideo, /not implemented in current firmware \(up unsupported\)/)
+	assert.match(up[0].provideo, /read-modify-write \(\+109\)/)
+
+	const down = decodeDump(parseLines(tx([0x01, 0x04, 0x0c, 0x03])))
+	assert.match(down[0].provideo, /read-modify-write \(-109\)/)
+})
+
+test('rud command (Shutter) supports the full Reset/Up/Down structure via firmware read-modify-write', () => {
+	const reset = decodeDump(parseLines(tx([0x01, 0x04, 0x0a, 0x00])))
+	assert.equal(reset[0].provideo, 'cam_exposure 10000')
+
+	const up = decodeDump(parseLines(tx([0x01, 0x04, 0x0a, 0x02])))
+	assert.match(up[0].provideo, /read-modify-write \(\+93us\)/)
+
+	const down = decodeDump(parseLines(tx([0x01, 0x04, 0x0a, 0x03])))
+	assert.match(down[0].provideo, /read-modify-write \(-93us\)/)
 })
 
 test('rud command with firmware read-modify-write support (Red Gain up)', () => {
@@ -109,6 +188,54 @@ test('enum command with a per-choice ProVideo mapping (White Balance -> Indoor)'
 test('enum command not handled by any firmware dispatcher reports as such', () => {
 	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x35, 0x20]))) // Color Temp
 	assert.match(entries[0].provideo, /not implemented in current firmware \(Color Temp unsupported\)/)
+})
+
+test('cam_bright (RUD) supports Reset/Up/Down via read-modify-write of post_bright', () => {
+	const reset = decodeDump(parseLines(tx([0x01, 0x04, 0x0d, 0x00])))
+	assert.match(reset[0].companion, /Bright reset/)
+	assert.equal(reset[0].provideo, 'post_bright 0')
+
+	const up = decodeDump(parseLines(tx([0x01, 0x04, 0x0d, 0x02])))
+	assert.match(up[0].provideo, /read-modify-write \(\+5\)/)
+})
+
+test('Bright (direct) decodes a negative signed value (post_bright)', () => {
+	const bright = decodeDump(parseLines(tx([0x01, 0x04, 0x0d, 0x00, 0x00, ...encodeNibbles(-5 & 0xff, 2)])))
+	assert.match(bright[0].companion, /Bright \(direct\) = -5/)
+	assert.equal(bright[0].provideo, 'post_bright -5')
+})
+
+test('the standard "CAM_Brightness" function (0xA1) is a pure duplicate of cam_bright_direct and is not decoded (not exposed in Companion)', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0xa1, 0x00, 0x00, ...encodeNibbles(-5 & 0xff, 2)])))
+	assert.equal(entries[0].provideo, '(no ProVideo mapping known)')
+})
+
+test('cam_gamma maps directly to log_mode', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x5b, 0x03])))
+	assert.match(entries[0].companion, /Gamma = S-Log3/)
+	assert.equal(entries[0].provideo, 'log_mode 3')
+})
+
+test("cam_flicker read-modify-writes aec's taf field (Off and 50Hz both normalize to taf=10000)", () => {
+	const off = decodeDump(parseLines(tx([0x01, 0x04, 0x23, 0x00])))
+	assert.match(off[0].provideo, /taf=10000, same as 50Hz/)
+
+	const hz60 = decodeDump(parseLines(tx([0x01, 0x04, 0x23, 0x02])))
+	assert.match(hz60[0].provideo, /taf=8333/)
+})
+
+test('cam_lr_reverse and cam_picture_flip (0x61/0x66) are not decoded -- cam_flip already reaches every state', () => {
+	const lr = decodeDump(parseLines(tx([0x01, 0x04, 0x61, 0x02])))
+	assert.equal(lr[0].provideo, '(no ProVideo mapping known)')
+
+	const pf = decodeDump(parseLines(tx([0x01, 0x04, 0x66, 0x03])))
+	assert.equal(pf[0].provideo, '(no ProVideo mapping known)')
+})
+
+test('color_temp_direct is a raw wb_preset index passthrough, not a Kelvin value', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x20, 0x00, 0x00, ...encodeNibbles(3, 2)])))
+	assert.match(entries[0].companion, /Color Temp \(direct\) = 3/)
+	assert.equal(entries[0].provideo, 'wb_preset 3')
 })
 
 test('translate() returns a clear message for a frame with no table entry at all', () => {

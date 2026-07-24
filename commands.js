@@ -19,12 +19,12 @@ export const ENUM = {
 	ae: { 0x00: 'FullAuto', 0x03: 'Manual', 0x0a: 'ShutterPriority' },
 	gamma: { 0x00: 'BT709', 0x01: 'HLG', 0x02: 'PQ', 0x03: 'SLOG3' },
 	flicker: { 0x01: '50Hz', 0x02: '60Hz' },
-	onoff23: { 0x02: 'On', 0x03: 'Off' },
 	flip: { 0x00: 'Off', 0x01: 'Flip-H', 0x02: 'Flip-V', 0x03: 'Flip-HV' },
 	// Dream Chip extension reply maps (raw camera value -> label)
 	dct_onoff: { 0x00: 'Off', 0x01: 'On' },
 	dct_gain_mode: { 0x00: 'Auto', 0x01: 'LCG', 0x02: 'HCG' },
-	dct_sdi_range: { 0x00: 'Full', 0x01: 'Legal' },
+	// do_sdi_range's own help text: "<flag> - set sdi range [0: legal, 1: full range]"
+	dct_sdi_range: { 0x00: 'Legal', 0x01: 'Full' },
 	dct_timecode_hold: { 0x00: 'Run', 0x01: 'Hold' },
 }
 
@@ -113,10 +113,19 @@ export const COMMANDS = {
 		name: 'AE Mode', group: 'Exposure', kind: 'enum',
 		choices: { 'Full Auto': P(0x01, 0x04, 0x39, 0x00), Manual: P(0x01, 0x04, 0x39, 0x03), 'Shutter Pri': P(0x01, 0x04, 0x39, 0x0a) },
 	},
+	// Reset/Up/Down is the standard VISCA CAM_Gain structure. Up/Down are a
+	// firmware-side read-modify-write of cam_gain's real value (query current
+	// value, step by ~109 gain units -- the same "10 raw nibble-steps' worth"
+	// density as gain_red/blue/green's step -- clamp to 1000-45715, resend).
 	cam_gain: { name: 'Gain', group: 'Exposure', kind: 'rud', func: 0x0c },
-	// cam_gain's real range is 1000-22858 (1x/0dB/140 ISO to 22x/13.6dB/3200 ISO);
-	// widened to 3 nibbles (0-4095) for ~5.3 gain units per step, matching the BSP.
+	// cam_gain's real range is 1000-45715 (1x/0dB/140 ISO min; max from the
+	// current AUTO gain-mode range, isi_access_get_gain_range); widened to 3
+	// nibbles (0-4095) for ~10.9 gain units per step, matching the BSP.
 	cam_gain_direct: { name: 'Gain (direct)', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00), nibbles: 3 },
+	// Reset/Up/Down is the standard VISCA CAM_Shutter structure. Up/Down are a
+	// firmware-side read-modify-write of cam_exposure's real value (query
+	// current value, step by ~93us -- the same "10 raw nibble-steps' worth"
+	// density as gain_red/blue/green's step -- clamp to 100-38339us, resend).
 	cam_shutter: { name: 'Shutter', group: 'Exposure', kind: 'rud', func: 0x0a },
 	// cam_exposure's real range is 100-38339us (observed on real hardware);
 	// widened to 3 nibbles (0-4095) for ~9.3us per step, matching the BSP.
@@ -127,11 +136,17 @@ export const COMMANDS = {
 	},
 
 	// White balance
+	// The standard VISCA set also defines a "One Push" WB mode (0x35/0x03),
+	// but it lands on the exact same real command as Manual (both send
+	// "awb 0" -- selecting either just disables continuous auto-WB, it
+	// doesn't calculate anything by itself; see Trigger below for the command
+	// that actually runs the one-push calculation), so it's not exposed as a
+	// separate choice here.
 	cam_wb: {
 		name: 'White Balance', group: 'White Balance', kind: 'enum',
 		choices: {
 			Auto: P(0x01, 0x04, 0x35, 0x00), Indoor: P(0x01, 0x04, 0x35, 0x01), Outdoor: P(0x01, 0x04, 0x35, 0x02),
-			'One Push': P(0x01, 0x04, 0x35, 0x03), Manual: P(0x01, 0x04, 0x35, 0x05), 'Color Temp': P(0x01, 0x04, 0x35, 0x20),
+			Manual: P(0x01, 0x04, 0x35, 0x05), 'Color Temp': P(0x01, 0x04, 0x35, 0x20),
 			Trigger: P(0x01, 0x04, 0x10, 0x05),
 		},
 	},
@@ -149,18 +164,41 @@ export const COMMANDS = {
 	// post_hue's real range is signed -128..127 (ISP_CCOR12_HUE_MIN/MAX); wire
 	// format widened from 1 nibble (unsigned 0-15, couldn't go negative at all).
 	cam_color_hue_direct: { name: 'Color Hue (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x4f, 0x00, 0x00), nibbles: 2, signed: true },
+	// No ProVideo command accepts a settable Kelvin value (stat_cct is
+	// read-only AWB telemetry). wb_preset's calibration-profile presets each
+	// have a real Kelvin rating, but there's no way to query which preset is
+	// currently active -- so this is a raw preset-index passthrough with no
+	// Kelvin matching (apply_color_profile's own -EINVAL bounds check handles
+	// an out-of-range index) and has no inquiry counterpart. `max` narrows the
+	// Companion-side UI/knob range to 0-9 -- the largest calibration profile
+	// has 10 presets (indices 0-9); profile 0 only has 7 (0-6), so indices
+	// 7-9 still correctly error there (confirmed on real hardware), but 0-9
+	// is the real usable range across profiles, not the wire's full 0-4095.
+	color_temp_direct: { name: 'Color Temp (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x20, 0x00, 0x00), nibbles: 2, min: 0, max: 9 },
 
 	// Picture
 	cam_gamma: {
 		name: 'Gamma', group: 'Picture', kind: 'enum',
 		choices: { 'BT.709': P(0x01, 0x04, 0x5b, 0x00), HLG: P(0x01, 0x04, 0x5b, 0x01), PQ: P(0x01, 0x04, 0x5b, 0x02), 'S-Log3': P(0x01, 0x04, 0x5b, 0x03) },
 	},
+	// post_bright's real range is signed -128..127 (ISP_CPROC_BRIGHTNESS_MIN/MAX
+	// or equivalently ISP_CCOR12_BRIGHTNESS_MIN/MAX); signed to match the fix
+	// in visca_map_picture.c. cam_bright's Direct form shares its RUD's
+	// function byte (0x0d) -- the firmware disambiguates by packet length,
+	// mirroring ggain_command's own dispatch style.
+	// (The standard VISCA set also defines a 2nd, Direct-only "CAM_Brightness"
+	// function (0xA1) that lands on this exact same post_bright command --
+	// the firmware still answers it for other controllers, but it's a pure
+	// duplicate of cam_bright_direct so it's deliberately not exposed here.)
 	cam_bright: { name: 'Bright', group: 'Picture', kind: 'rud', func: 0x0d },
-	cam_bright_direct: { name: 'Bright (direct)', group: 'Picture', kind: 'direct', prefix: P(0x01, 0x04, 0x0d, 0x00, 0x00), nibbles: 2 },
-	cam_brightness_direct: { name: 'Brightness (direct)', group: 'Picture', kind: 'direct', prefix: P(0x01, 0x04, 0xa1, 0x00, 0x00), nibbles: 2 },
+	cam_bright_direct: { name: 'Bright (direct)', group: 'Picture', kind: 'direct', prefix: P(0x01, 0x04, 0x0d, 0x00, 0x00), nibbles: 2, signed: true },
 	cam_contrast_direct: { name: 'Contrast (direct)', group: 'Picture', kind: 'direct', prefix: P(0x01, 0x04, 0xa2, 0x00, 0x00), nibbles: 2 },
-	cam_lr_reverse: { name: 'LR Reverse', group: 'Picture', kind: 'enum', choices: { On: P(0x01, 0x04, 0x61, 0x02), Off: P(0x01, 0x04, 0x61, 0x03) } },
-	cam_picture_flip: { name: 'Picture Flip', group: 'Picture', kind: 'enum', choices: { On: P(0x01, 0x04, 0x66, 0x02), Off: P(0x01, 0x04, 0x66, 0x03) } },
+	// The standard VISCA set also defines cam_lr_reverse (func 0x61) and
+	// cam_picture_flip (func 0x66) -- independent On/Off toggles of just the
+	// horizontal or vertical bit of this same `flip` value via read-modify-
+	// write. The firmware still answers both for other controllers, but
+	// cam_flip's 4-state direct select already reaches every combination in
+	// one command, so they're deliberately not exposed here.
 	cam_flip: {
 		name: 'Flip', group: 'Picture', kind: 'enum',
 		choices: { Off: P(0x01, 0x04, 0xa4, 0x00), 'Flip-H': P(0x01, 0x04, 0xa4, 0x01), 'Flip-V': P(0x01, 0x04, 0xa4, 0x02), 'Flip-HV': P(0x01, 0x04, 0xa4, 0x03) },
@@ -196,11 +234,16 @@ export const COMMANDS = {
 	dct_black_green: { name: 'Black Green', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x05), nibbles: 3, signed: true },
 	dct_black_blue: { name: 'Black Blue', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x06), nibbles: 3, signed: true },
 
-	// flare's real range is 0-65535 (ISP_BLS_FLARE_MIN/MAX); widened to 4
-	// nibbles to represent it exactly, matching the BSP. Sets the same value
-	// for all three channels (VISCA has no separate red/green/blue sub-opcode
-	// for it, unlike black_red/green/blue).
-	dct_flare: { name: 'Flare', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x07), nibbles: 4 },
+	// Flare's real signature is "flare <red> <green> <blue>" -- positional,
+	// all 3 needed on every set (do_flare has no single-channel form).
+	// Firmware handles this via read-modify-write, same as the aec fields
+	// further down: it queries flare's current 3-value state, overrides just
+	// the one channel below, and reissues the full command. Real range per
+	// channel is 0-65535 (ISP_BLS_FLARE_MIN/MAX); raw is 0-4095, firmware
+	// multiplies it by 16 (same x16 scale as audio_gain).
+	dct_flare_red: { name: 'Flare Red', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x07), nibbles: 3 },
+	dct_flare_green: { name: 'Flare Green', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1b), nibbles: 3 },
+	dct_flare_blue: { name: 'Flare Blue', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1c), nibbles: 3 },
 	dct_awb_speed: { name: 'AWB Speed', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x08), nibbles: 1 },
 	dct_slog3_gain: { name: 'S-Log3 Master Gain', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x09), nibbles: 2 },
 	dct_color_space: { name: 'Color Space', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x17), nibbles: 1 },
@@ -217,8 +260,10 @@ export const COMMANDS = {
 	dct_filter_enable: { name: 'Filter Enable', group: 'DCT Detail/NR', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x14, 0x00), On: P(0x01, 0x7e, 0x01, 0x14, 0x01) } },
 	// real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL, firmware hard-rejects >=32);
 	// wire stays 2 nibbles (0-255, same as filter_denoise's real 0-255), but
-	// firmware now clamps raw values above 31 to 31 instead of erroring.
-	dct_filter_detail: { name: 'Filter Detail', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x15), nibbles: 2 },
+	// firmware now clamps raw values above 31 to 31 instead of erroring. `max`
+	// narrows the Companion-side UI/knob range to what's actually usable,
+	// instead of letting the wire's full 0-255 capacity leak through.
+	dct_filter_detail: { name: 'Filter Detail', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x15), nibbles: 2, max: 31 },
 	// real range is 0-255 (ISP_FLT_MAX_DENOISE_LVL); 1 nibble truncated it,
 	// widened to 2 nibbles to match it exactly.
 	dct_filter_denoise: { name: 'Filter Denoise', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x16), nibbles: 2 },
@@ -227,7 +272,8 @@ export const COMMANDS = {
 	dct_lut_fixed_mode: { name: 'LUT Fixed Mode', group: 'DCT LUT', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x25), nibbles: 1 },
 	dct_lut_preset: { name: 'LUT Preset', group: 'DCT LUT', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x26), nibbles: 1 },
 
-	dct_sdi_range: { name: 'SDI Range', group: 'DCT SDI', kind: 'enum', choices: { Full: P(0x01, 0x7e, 0x01, 0x30, 0x00), Legal: P(0x01, 0x7e, 0x01, 0x30, 0x01) } },
+	// do_sdi_range's own help text: "<flag> - set sdi range [0: legal, 1: full range]"
+	dct_sdi_range: { name: 'SDI Range', group: 'DCT SDI', kind: 'enum', choices: { Legal: P(0x01, 0x7e, 0x01, 0x30, 0x00), Full: P(0x01, 0x7e, 0x01, 0x30, 0x01) } },
 	dct_sdi_black: { name: 'SDI Black', group: 'DCT SDI', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x31), nibbles: 2 },
 	dct_sdi_white: { name: 'SDI White', group: 'DCT SDI', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x32), nibbles: 2 },
 
@@ -237,6 +283,25 @@ export const COMMANDS = {
 	// gain); kept at 3 nibbles (0-4095) with firmware scaling by 16 to cover
 	// 0-65520 -- the top 15 values are unreachable, an accepted tradeoff.
 	dct_audio_gain: { name: 'Audio Gain', group: 'DCT OSD/Audio', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x66), nibbles: 3 },
+
+	// --- AEC (auto exposure control) individual fields ------------------------
+	// aec's real signature is "aec <enable> <setPoint> <speed> <clmTolerance>
+	// <costGain> <costTint> <costApt> <taf> <maxGain> <useCustomWeights>" --
+	// positional/cumulative (setting field N needs all preceding fields too).
+	// Firmware handles this via read-modify-write: it queries aec's current
+	// 10-value state, overrides just the one field below, and reissues the
+	// full command. VISCA/Companion only ever sends the ONE field's value.
+	// setPoint: real range 50-3000 (internal unitless ISP luminance-target
+	// scalar); 3 nibbles (0-4095) clamp to it, no scaling needed. `min`/`max`
+	// narrow the Companion-side UI/knob range to what's actually usable,
+	// instead of letting the wire's full 0-4095 capacity leak through.
+	dct_aec_setpoint: { name: 'AEC SetPoint', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x18), nibbles: 3, min: 50, max: 3000 },
+	// speed: real range 1-30 (AEC_LOW_PASS_FILTER_SIZE_MIN/MAX); 2 nibbles
+	// (0-255) clamp to it, no scaling needed. Same `min`/`max` narrowing.
+	dct_aec_speed: { name: 'AEC Speed', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x19), nibbles: 2, min: 1, max: 30 },
+	// maxGain: real range 1000-45715 (same as cam_gain, same underlying
+	// isi_access_get_gain_range query); 3 nibbles, linearly scaled.
+	dct_aec_maxgain: { name: 'AEC Max Gain', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1a), nibbles: 3 },
 
 	dct_auto_save: { name: 'Auto Save', group: 'DCT System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x62, 0x00), On: P(0x01, 0x7e, 0x01, 0x62, 0x01) } },
 	dct_timecode_hold: { name: 'Timecode Hold', group: 'DCT System', kind: 'enum', choices: { Run: P(0x01, 0x7e, 0x01, 0x64, 0x00), Hold: P(0x01, 0x7e, 0x01, 0x64, 0x01) } },
@@ -257,12 +322,9 @@ export const INQUIRIES = {
 	color_gain: { name: 'Color Gain', varId: 'color_gain', payload: P(0x09, 0x04, 0x49), decode: { type: 'value' } },
 	color_hue: { name: 'Color Hue', varId: 'color_hue', payload: P(0x09, 0x04, 0x4f), decode: { type: 'value', signed: true } },
 	gamma: { name: 'Gamma', varId: 'gamma', payload: P(0x09, 0x04, 0x5b), decode: { type: 'enum', map: ENUM.gamma } },
-	bright: { name: 'Bright', varId: 'bright', payload: P(0x09, 0x04, 0x4d), decode: { type: 'value' } },
-	brightness: { name: 'Brightness', varId: 'brightness', payload: P(0x09, 0x04, 0xa1), decode: { type: 'value' } },
+	bright: { name: 'Bright', varId: 'bright', payload: P(0x09, 0x04, 0x4d), decode: { type: 'value', signed: true } },
 	contrast: { name: 'Contrast', varId: 'contrast', payload: P(0x09, 0x04, 0xa2), decode: { type: 'value' } },
 	flicker: { name: 'Flicker', varId: 'flicker', payload: P(0x09, 0x04, 0x55), decode: { type: 'enum', map: ENUM.flicker } },
-	lr_reverse: { name: 'LR Reverse', varId: 'lr_reverse', payload: P(0x09, 0x04, 0x61), decode: { type: 'enum', map: ENUM.onoff23 } },
-	picture_flip: { name: 'Picture Flip', varId: 'picture_flip', payload: P(0x09, 0x04, 0x66), decode: { type: 'enum', map: ENUM.onoff23 } },
 	flip: { name: 'Flip', varId: 'flip', payload: P(0x09, 0x04, 0xa4), decode: { type: 'enum', map: ENUM.flip } },
 
 	// DCT vendor extensions (09 7E 01 SS)
@@ -272,7 +334,9 @@ export const INQUIRIES = {
 	dct_black_red: { name: 'Black Red', varId: 'dct_black_red', payload: P(0x09, 0x7e, 0x01, 0x04), decode: { type: 'value', signed: true } },
 	dct_black_green: { name: 'Black Green', varId: 'dct_black_green', payload: P(0x09, 0x7e, 0x01, 0x05), decode: { type: 'value', signed: true } },
 	dct_black_blue: { name: 'Black Blue', varId: 'dct_black_blue', payload: P(0x09, 0x7e, 0x01, 0x06), decode: { type: 'value', signed: true } },
-	dct_flare: { name: 'Flare', varId: 'dct_flare', payload: P(0x09, 0x7e, 0x01, 0x07), decode: { type: 'value' } },
+	dct_flare_red: { name: 'Flare Red', varId: 'dct_flare_red', payload: P(0x09, 0x7e, 0x01, 0x07), decode: { type: 'value' } },
+	dct_flare_green: { name: 'Flare Green', varId: 'dct_flare_green', payload: P(0x09, 0x7e, 0x01, 0x1b), decode: { type: 'value' } },
+	dct_flare_blue: { name: 'Flare Blue', varId: 'dct_flare_blue', payload: P(0x09, 0x7e, 0x01, 0x1c), decode: { type: 'value' } },
 	dct_awb_speed: { name: 'AWB Speed', varId: 'dct_awb_speed', payload: P(0x09, 0x7e, 0x01, 0x08), decode: { type: 'value' } },
 	dct_slog3_gain: { name: 'S-Log3 Master Gain', varId: 'dct_slog3_gain', payload: P(0x09, 0x7e, 0x01, 0x09), decode: { type: 'value' } },
 	dct_cnr_mode: { name: 'CNR Mode', varId: 'dct_cnr_mode', payload: P(0x09, 0x7e, 0x01, 0x10), decode: { type: 'value' } },
@@ -297,6 +361,9 @@ export const INQUIRIES = {
 	dct_timecode_hold: { name: 'Timecode Hold', varId: 'dct_timecode_hold', payload: P(0x09, 0x7e, 0x01, 0x64), decode: { type: 'enum', map: ENUM.dct_timecode_hold } },
 	dct_audio_enable: { name: 'Audio Enable', varId: 'dct_audio_enable', payload: P(0x09, 0x7e, 0x01, 0x65), decode: { type: 'enum', map: ENUM.dct_onoff } },
 	dct_audio_gain: { name: 'Audio Gain', varId: 'dct_audio_gain', payload: P(0x09, 0x7e, 0x01, 0x66), decode: { type: 'value' } },
+	dct_aec_setpoint: { name: 'AEC SetPoint', varId: 'dct_aec_setpoint', payload: P(0x09, 0x7e, 0x01, 0x18), decode: { type: 'value' } },
+	dct_aec_speed: { name: 'AEC Speed', varId: 'dct_aec_speed', payload: P(0x09, 0x7e, 0x01, 0x19), decode: { type: 'value' } },
+	dct_aec_maxgain: { name: 'AEC Max Gain', varId: 'dct_aec_maxgain', payload: P(0x09, 0x7e, 0x01, 0x1a), decode: { type: 'value' } },
 }
 
 // RUD action byte per choice.
@@ -305,9 +372,13 @@ export const RUD = { reset: 0x00, up: 0x02, down: 0x03 }
 // Continuous (knob-able) parameters, derived from the `direct` commands. Each
 // entry gives the absolute-set command id (`cmd`), the value variable shown on
 // the encoder LCD / read for the current value (`varId`, from INQUIRIES), and the
-// value range (`max`, from `nibbles`). The rotary presets and the relative
-// Adjust action are generated from this list. varId rule: strip a trailing
-// `_direct`, then drop a leading `cam_` (dct_* ids equal their inquiry varId).
+// value range (`min`/`max`, from `nibbles` unless the command narrows it --
+// see e.g. dct_aec_speed, whose wire capacity (0-255) is wider than what the
+// firmware actually uses (1-30); exposing the full wire range in the UI would
+// let the knob/action silently no-op past the real clamp). The rotary presets
+// and the relative Adjust action are generated from this list. varId rule:
+// strip a trailing `_direct`, then drop a leading `cam_` (dct_* ids equal
+// their inquiry varId).
 export function continuousParams() {
 	return Object.entries(COMMANDS)
 		.filter(([, c]) => c.kind === 'direct')
@@ -315,6 +386,8 @@ export function continuousParams() {
 			const base = id.endsWith('_direct') ? id.slice(0, -'_direct'.length) : id
 			const varId = base.startsWith('cam_') ? base.slice(4) : base
 			const bits = 4 * c.nibbles
+			const wireMin = c.signed ? -(1 << (bits - 1)) : 0
+			const wireMax = c.signed ? (1 << (bits - 1)) - 1 : (1 << bits) - 1
 			return {
 				id,
 				cmd: id,
@@ -323,8 +396,8 @@ export function continuousParams() {
 				group: c.group,
 				nibbles: c.nibbles,
 				signed: !!c.signed,
-				min: c.signed ? -(1 << (bits - 1)) : 0,
-				max: c.signed ? (1 << (bits - 1)) - 1 : (1 << bits) - 1,
+				min: c.min ?? wireMin,
+				max: c.max ?? wireMax,
 			}
 		})
 }

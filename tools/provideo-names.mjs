@@ -11,7 +11,7 @@
 //   scaled - true if the raw VISCA value isn't the literal ProVideo argument —
 //            currently always a documented linear scale across a real,
 //            known min-max range (see each entry's `note`: cam_gain
-//            1000-22858, cam_exposure 100-38339us). We deliberately do NOT
+//            1000-45715, cam_exposure 100-38339us). We deliberately do NOT
 //            re-implement that scaling math here, since it lives in and can
 //            change independently of this tool.
 //            gain_red/gain_blue/gain_green are NOT in this category: their
@@ -33,18 +33,18 @@ export const PROVIDEO_NAMES = {
 	// --- category 0x04 exposure (visca_map_exposure.c) ----------------------
 	cam_ae: { choices: { 'Full Auto': 'aec 1', Manual: 'aec 0', 'Shutter Pri': 'aec 1' } },
 	ae_mode: { cmd: 'aec', scaled: false, note: 'readback: aec!=0 -> Full Auto, else Manual (Shutter Pri is not distinguishable on readback)' },
-	cam_gain: { cmd: 'cam_gain', rud: { reset: 'cam_gain 1000', up: null, down: null } },
+	cam_gain: { cmd: 'cam_gain', rud: { reset: 'cam_gain 1000', up: 'read-modify-write (+109)', down: 'read-modify-write (-109)' } },
 	cam_gain_direct: {
 		cmd: 'cam_gain',
 		scaled: true,
-		note: 'real range is 1000-22858 (1x/0dB/140 ISO .. 22x/13.6dB/3200 ISO); raw is 0-4095, linearly scaled, not a placeholder',
+		note: 'real range is 1000-45715 (1x/0dB/140 ISO min; max from the current AUTO gain-mode range); raw is 0-4095, linearly scaled, not a placeholder',
 	},
 	gain: {
 		cmd: 'cam_gain',
 		scaled: true,
-		note: 'real range is 1000-22858 (1x/0dB/140 ISO .. 22x/13.6dB/3200 ISO); raw is 0-4095, linearly scaled, not a placeholder',
+		note: 'real range is 1000-45715 (1x/0dB/140 ISO min; max from the current AUTO gain-mode range); raw is 0-4095, linearly scaled, not a placeholder',
 	},
-	cam_shutter: { cmd: 'cam_exposure', rud: { reset: 'cam_exposure 10000', up: null, down: null } },
+	cam_shutter: { cmd: 'cam_exposure', rud: { reset: 'cam_exposure 10000', up: 'read-modify-write (+93us)', down: 'read-modify-write (-93us)' } },
 	cam_shutter_direct: {
 		cmd: 'cam_exposure',
 		scaled: true,
@@ -62,11 +62,16 @@ export const PROVIDEO_NAMES = {
 	cam_wb: {
 		choices: {
 			Auto: 'awb 1', Indoor: 'wb_preset 1', Outdoor: 'wb_preset 2',
-			'One Push': 'awb 0', Manual: 'awb 0', Trigger: 'wb',
+			Manual: 'awb 0', Trigger: 'wb',
 			'Color Temp': null, // not handled by wb_command's switch — falls to -ENOTSUP
 		},
 	},
 	wb_mode: { cmd: 'awb', scaled: false, note: 'readback only distinguishes Auto/Manual, not preset/trigger detail' },
+	// No ProVideo command accepts a settable Kelvin value; wb_preset's
+	// calibration-profile presets each have a real Kelvin rating, but there's
+	// no way to query which one is active. This is a raw preset-index
+	// passthrough (no Kelvin matching) with no inquiry counterpart.
+	color_temp_direct: { cmd: 'wb_preset', scaled: false, note: 'raw preset index passthrough, not a Kelvin value -- see COMMANDS.color_temp_direct' },
 	cam_rgain: { cmd: 'gain_red', rud: { reset: 'gain_red 512', up: 'read-modify-write (+step)', down: 'read-modify-write (-step)' } },
 	cam_rgain_direct: { cmd: 'gain_red', scaled: false },
 	rgain: { cmd: 'gain_red', scaled: false },
@@ -79,31 +84,44 @@ export const PROVIDEO_NAMES = {
 	color_gain: { cmd: 'post_sat', scaled: false },
 	cam_color_hue_direct: { cmd: 'post_hue', scaled: false },
 	color_hue: { cmd: 'post_hue', scaled: false },
-	cam_brightness_direct: { cmd: 'post_bright', scaled: false },
-	brightness: { cmd: 'post_bright', scaled: false },
 	cam_contrast_direct: { cmd: 'post_cont', scaled: false },
 	contrast: { cmd: 'post_cont', scaled: false },
 	cam_flip: { cmd: 'flip', scaled: false },
 	flip: { cmd: 'flip', scaled: false },
+	// cam_bright's Direct form shares its RUD's function byte (0x0D) --
+	// disambiguated by packet length, not a separate function code.
+	cam_bright: { cmd: 'post_bright', rud: { reset: 'post_bright 0', up: 'read-modify-write (+5)', down: 'read-modify-write (-5)' } },
+	cam_bright_direct: { cmd: 'post_bright', scaled: false },
+	bright: { cmd: 'post_bright', scaled: false },
+	// cam_gamma is a plain 4-value enum passthrough to log_mode. Value 0 isn't
+	// literally hardcoded to BT709 in the firmware (it's "log mode off,
+	// restore whatever LUT was active before"), but the system default LUT is
+	// Rec.709, so it behaves as BT709 in the common case.
+	cam_gamma: { cmd: 'log_mode', scaled: false },
+	gamma: { cmd: 'log_mode', scaled: false },
+	// No dedicated flicker command exists -- this read-modify-writes aec's
+	// `taf` field (the anti-flicker exposure quantum). taf can't truly be
+	// disabled, so Off and 50Hz both resolve to the same real value (10000).
+	cam_flicker: {
+		choices: {
+			Off: 'read-modify-write of aec (taf=10000, same as 50Hz -- taf cannot be disabled)',
+			'50Hz': 'read-modify-write of aec (taf=10000)',
+			'60Hz': 'read-modify-write of aec (taf=8333)',
+		},
+	},
+	flicker: { cmd: 'aec', scaled: false, note: "reads aec's taf field: 8333 -> 60Hz, anything else (including the un-set-able Off) normalizes to 50Hz" },
 
 	// --- not handled by any visca_map_*.c in the current firmware -----------
 	// (present as a Companion command/inquiry, but no dispatcher recognizes
 	// the function code yet — the camera will reply 0x60/0x41.)
-	cam_bright: { cmd: null, note: 'not implemented in current firmware (func 0x0D unhandled)' },
-	cam_bright_direct: { cmd: null, note: 'not implemented in current firmware (func 0x0D unhandled)' },
-	bright: { cmd: null, note: 'not implemented in current firmware (func 0x0D unhandled)' },
 	cam_memory: { cmd: null, note: 'not implemented in current firmware (func 0x3F unhandled)' },
-	cam_flicker: { cmd: null, note: 'not implemented in current firmware (func 0x23 unhandled)' },
-	flicker: { cmd: null, note: 'not implemented in current firmware (func 0x23 unhandled)' },
-	cam_gamma: { cmd: null, note: 'not implemented in current firmware (func 0x5B unhandled)' },
-	gamma: { cmd: null, note: 'not implemented in current firmware (func 0x5B unhandled)' },
-	cam_lr_reverse: { cmd: null, note: 'not implemented in current firmware (func 0x61 unhandled)' },
-	lr_reverse: { cmd: null, note: 'not implemented in current firmware (func 0x61 unhandled)' },
-	cam_picture_flip: { cmd: null, note: 'not implemented in current firmware (func 0x66 unhandled)' },
-	picture_flip: { cmd: null, note: 'not implemented in current firmware (func 0x66 unhandled)' },
 	cam_settings_save: { cmd: null, note: 'not implemented in current firmware (func 0xA5 unhandled)' },
 	cam_settings_reset: { cmd: null, note: 'not implemented in current firmware (func 0xA0 unhandled)' },
-	color_temp: { cmd: null, note: 'not implemented in current firmware (func 0x20 unhandled)' },
+	// SET works (raw wb_preset index passthrough -- no ProVideo command
+	// accepts a settable Kelvin value, only stat_cct exists and it's
+	// read-only AWB telemetry). INQUIRY has no data source: the currently
+	// active preset index is never exposed via any text command.
+	color_temp: { cmd: null, note: "no way to read back the current wb_preset index; SET works, see COMMANDS.color_temp_direct" },
 	video_mode: { cmd: null, note: 'video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping' },
 	power: { cmd: 'low_power', scaled: false, note: 'reachability implies On; see visca_map_system.c cam_power_inq' },
 	version: { cmd: null, note: 'static identity reply, not a ProVideo command' },
@@ -112,7 +130,9 @@ export const PROVIDEO_NAMES = {
 	// Table-driven 1:1 mappings; raw decoded value == the ProVideo argument,
 	// no scaling — full confidence. Green gain (SS 0x01) is the one bespoke
 	// exception: it scales like the standard-category gains.
-	dct_ggain: { cmd: 'gain_green', choices: { Reset: 'gain_green 512', Up: 'read-modify-write (+step)', Down: 'read-modify-write (-step)' } },
+	// green's reset target is 256 (unity/1.0x, the AWB reference channel),
+	// unlike red/blue's 512 (2x) -- confirmed on real hardware.
+	dct_ggain: { cmd: 'gain_green', choices: { Reset: 'gain_green 256', Up: 'read-modify-write (+step)', Down: 'read-modify-write (-step)' } },
 	dct_ggain_direct: { cmd: 'gain_green', scaled: false },
 	dct_gain_mode: { cmd: 'gain_mode', scaled: false },
 	dct_black_master: { cmd: 'black_master', scaled: false },
@@ -131,7 +151,27 @@ export const PROVIDEO_NAMES = {
 		scaled: true,
 		note: 'real range is signed -4096..4095 (ISP_BLS_MIN/MAX); raw is signed -2048..2047, firmware doubles it (x2)',
 	},
-	dct_flare: { cmd: 'flare', scaled: false },
+	// flare's 3 individually-exposed channels: none of these are standalone
+	// commands -- they each set one positional argument of the larger
+	// "flare <red> <green> <blue>" command via firmware-side read-modify-write
+	// (query current 3-value state, override one channel, reissue the full
+	// command). `cmd: 'flare'` (not null) so the raw decoded value still shows
+	// in the tool's output alongside the caveat.
+	dct_flare_red: {
+		cmd: 'flare',
+		scaled: true,
+		note: "sets flare's positional arg 1 (red), real range 0-65535, via read-modify-write of all 3 args; raw is 0-4095, firmware multiplies it by 16",
+	},
+	dct_flare_green: {
+		cmd: 'flare',
+		scaled: true,
+		note: "sets flare's positional arg 2 (green), real range 0-65535, via read-modify-write of all 3 args; raw is 0-4095, firmware multiplies it by 16",
+	},
+	dct_flare_blue: {
+		cmd: 'flare',
+		scaled: true,
+		note: "sets flare's positional arg 3 (blue), real range 0-65535, via read-modify-write of all 3 args; raw is 0-4095, firmware multiplies it by 16",
+	},
 	dct_awb_speed: { cmd: 'awb_speed', scaled: false },
 	dct_slog3_gain: { cmd: 'slog3_master_gain', scaled: false },
 	dct_cnr_mode: { cmd: 'cnr_mode', scaled: false },
@@ -168,4 +208,27 @@ export const PROVIDEO_NAMES = {
 	},
 	dct_auto_save: { cmd: 'auto_save', scaled: false },
 	dct_timecode_hold: { cmd: 'timecode_hold', scaled: false },
+
+	// aec's 3 individually-exposed fields: none of these are standalone
+	// commands -- they each set one positional argument of the much larger
+	// "aec <enable> <setPoint> <speed> <clmTolerance> <costGain> <costTint>
+	// <costApt> <taf> <maxGain> <useCustomWeights>" command via firmware-side
+	// read-modify-write (query current 10-value state, override one field,
+	// reissue the full command). `cmd: 'aec'` (not null) so the raw decoded
+	// value still shows in the tool's output alongside the caveat.
+	dct_aec_setpoint: {
+		cmd: 'aec',
+		scaled: true,
+		note: "sets aec's positional arg 2 (setPoint), real range 50-3000, via read-modify-write of all 10 args",
+	},
+	dct_aec_speed: {
+		cmd: 'aec',
+		scaled: true,
+		note: "sets aec's positional arg 3 (speed), real range 1-30, via read-modify-write of all 10 args",
+	},
+	dct_aec_maxgain: {
+		cmd: 'aec',
+		scaled: true,
+		note: "sets aec's positional arg 9 (maxGain), real range 1000-45715 (same as cam_gain), via read-modify-write of all 10 args",
+	},
 }

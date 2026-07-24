@@ -171,6 +171,11 @@ test('RUD action bytes', () => {
 	assert.deepEqual(RUD, { reset: 0x00, up: 0x02, down: 0x03 })
 })
 
+test('cam_gain and cam_shutter expose the full Reset/Up/Down rud structure (no per-command restriction)', () => {
+	assert.equal(COMMANDS.cam_gain.rudChoices, undefined)
+	assert.equal(COMMANDS.cam_shutter.rudChoices, undefined)
+})
+
 // --- continuous (knob) params ----------------------------------------------
 test('continuousParams cover every direct command and map to a real inquiry variable', () => {
 	const params = continuousParams()
@@ -188,10 +193,14 @@ test('continuousParams cover every direct command and map to a real inquiry vari
 		assert.ok(varIds.has(p.varId), `${p.id}: varId '${p.varId}' has no matching inquiry`)
 		assert.ok([1, 2, 3, 4].includes(p.nibbles), `${p.id}: nibbles`)
 		const bits = 4 * p.nibbles
-		const expectedMax = p.signed ? (1 << (bits - 1)) - 1 : (1 << bits) - 1
-		const expectedMin = p.signed ? -(1 << (bits - 1)) : 0
-		assert.equal(p.max, expectedMax, `${p.id}: max derived from nibbles/signed`)
-		assert.equal(p.min, expectedMin, `${p.id}: min derived from nibbles/signed`)
+		const cmd = COMMANDS[p.cmd]
+		// A command may narrow its wire-derived range (e.g. dct_aec_speed:
+		// wire is 0-255, but the firmware only honors 1-30) via explicit
+		// min/max on the COMMANDS entry.
+		const expectedMax = cmd.max ?? (p.signed ? (1 << (bits - 1)) - 1 : (1 << bits) - 1)
+		const expectedMin = cmd.min ?? (p.signed ? -(1 << (bits - 1)) : 0)
+		assert.equal(p.max, expectedMax, `${p.id}: max derived from nibbles/signed, unless narrowed`)
+		assert.equal(p.min, expectedMin, `${p.id}: min derived from nibbles/signed, unless narrowed`)
 	}
 })
 
@@ -286,12 +295,171 @@ test("continuousParams' Black Master entry has a signed -2048..2047 range", () =
 	assert.equal(bm.max, 2047)
 })
 
-test('Flare (direct) uses 4 nibbles for its full 0-65535 range, an exact fit', () => {
-	// ISP_BLS_FLARE_MIN/MAX; widened from 2 nibbles (0-255), which badly
-	// truncated it, to 4 nibbles -- 65535 == 2^16-1, an exact identity mapping.
-	assert.equal(COMMANDS.dct_flare.nibbles, 4)
+// --- Flare individual channels (red/green/blue) -----------------------------
+// flare's real range is a firmware read-modify-write concern (see
+// provideo-names.mjs), not something the wire encoding itself needs to
+// express -- these are plain unsigned direct commands like any other.
+
+test('Flare Red (direct) round-trips a representative value (3 nibbles)', () => {
+	assert.equal(COMMANDS.dct_flare_red.nibbles, 3)
 	assert.deepEqual(
-		[...buildFrame(1, [...COMMANDS.dct_flare.prefix, ...encodeNibbles(65535, 4)])],
-		[0x81, 0x01, 0x7e, 0x01, 0x07, 0x0f, 0x0f, 0x0f, 0x0f, 0xff],
+		[...buildFrame(1, [...COMMANDS.dct_flare_red.prefix, ...encodeNibbles(300, 3)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x07, 0x01, 0x02, 0x0c, 0xff],
 	)
+})
+
+test('Flare Green (direct) round-trips its full raw range (3 nibbles)', () => {
+	assert.equal(COMMANDS.dct_flare_green.nibbles, 3)
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.dct_flare_green.prefix, ...encodeNibbles(4095, 3)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x1b, 0x0f, 0x0f, 0x0f, 0xff],
+	)
+})
+
+test('Flare Blue (direct) round-trips zero (3 nibbles)', () => {
+	assert.equal(COMMANDS.dct_flare_blue.nibbles, 3)
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.dct_flare_blue.prefix, ...encodeNibbles(0, 3)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x1c, 0x00, 0x00, 0x00, 0xff],
+	)
+})
+
+test('continuousParams includes the 3 Flare channels with unsigned 0-4095 ranges', () => {
+	const params = continuousParams()
+	const red = params.find((p) => p.id === 'dct_flare_red')
+	const green = params.find((p) => p.id === 'dct_flare_green')
+	const blue = params.find((p) => p.id === 'dct_flare_blue')
+
+	assert.equal(red.min, 0)
+	assert.equal(red.max, 4095)
+	assert.equal(green.min, 0)
+	assert.equal(green.max, 4095)
+	assert.equal(blue.min, 0)
+	assert.equal(blue.max, 4095)
+})
+
+// --- AEC individual fields (setPoint/speed/maxGain) -------------------------
+// aec's real range is a firmware read-modify-write concern (see
+// provideo-names.mjs), not something the wire encoding itself needs to
+// express -- these are plain unsigned direct commands like any other.
+
+test('AEC SetPoint (direct) round-trips a representative value (3 nibbles)', () => {
+	assert.equal(COMMANDS.dct_aec_setpoint.nibbles, 3)
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.dct_aec_setpoint.prefix, ...encodeNibbles(857, 3)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x18, 0x03, 0x05, 0x09, 0xff],
+	)
+})
+
+test('AEC Speed (direct) round-trips a representative value (2 nibbles)', () => {
+	assert.equal(COMMANDS.dct_aec_speed.nibbles, 2)
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.dct_aec_speed.prefix, ...encodeNibbles(26, 2)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x19, 0x01, 0x0a, 0xff],
+	)
+})
+
+test('AEC Max Gain (direct) round-trips its full raw range (3 nibbles)', () => {
+	assert.equal(COMMANDS.dct_aec_maxgain.nibbles, 3)
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.dct_aec_maxgain.prefix, ...encodeNibbles(4095, 3)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x1a, 0x0f, 0x0f, 0x0f, 0xff],
+	)
+})
+
+test('continuousParams includes the 3 AEC fields with correct ranges (setPoint/speed narrowed to their real clamp, maxGain fully scaled)', () => {
+	const params = continuousParams()
+	const setpoint = params.find((p) => p.id === 'dct_aec_setpoint')
+	const speed = params.find((p) => p.id === 'dct_aec_speed')
+	const maxgain = params.find((p) => p.id === 'dct_aec_maxgain')
+
+	assert.equal(setpoint.min, 50)
+	assert.equal(setpoint.max, 3000)
+	assert.equal(speed.min, 1)
+	assert.equal(speed.max, 30)
+	assert.equal(maxgain.min, 0)
+	assert.equal(maxgain.max, 4095)
+})
+
+// --- cam_bright (signed, post_bright) ---------------------------------------
+// The standard VISCA set also defines a 2nd, Direct-only "CAM_Brightness"
+// function (0xA1) landing on this exact same post_bright command; the
+// firmware still answers it for other controllers, but it's a pure
+// duplicate of cam_bright_direct, so it's deliberately not exposed as a
+// Companion command/inquiry (see commands.js's comment above cam_bright).
+
+test("cam_bright's Direct form shares its RUD's function byte (0x0d)", () => {
+	assert.equal(COMMANDS.cam_bright.kind, 'rud')
+	assert.equal(COMMANDS.cam_bright.func, 0x0d)
+	assert.equal(COMMANDS.cam_bright_direct.prefix[2], 0x0d)
+})
+
+test('Bright (direct) is signed, -128..127 (post_bright)', () => {
+	assert.equal(COMMANDS.cam_bright_direct.nibbles, 2)
+	assert.equal(COMMANDS.cam_bright_direct.signed, true)
+	// -5 as an 8-bit two's-complement value is 0xFB -> nibbles [0xF, 0xB]
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.cam_bright_direct.prefix, ...encodeNibbles(-5 & 0xff, 2)])],
+		[0x81, 0x01, 0x04, 0x0d, 0x00, 0x00, 0x0f, 0x0b, 0xff],
+	)
+})
+
+test("continuousParams' Bright (direct) entry has a signed -128..127 range", () => {
+	const p = continuousParams().find((x) => x.id === 'cam_bright_direct')
+	assert.equal(p.signed, true)
+	assert.equal(p.min, -128)
+	assert.equal(p.max, 127)
+})
+
+test('cam_brightness_direct is deliberately not exposed (pure duplicate of cam_bright_direct)', () => {
+	assert.equal(COMMANDS.cam_brightness_direct, undefined)
+	assert.equal(INQUIRIES.brightness, undefined)
+})
+
+// --- cam_gamma / cam_flicker (enums) -----------------------------------
+
+test('cam_gamma enum choices map to log_mode 0-3', () => {
+	assert.deepEqual(COMMANDS.cam_gamma.choices['BT.709'], [0x01, 0x04, 0x5b, 0x00])
+	assert.deepEqual(COMMANDS.cam_gamma.choices.HLG, [0x01, 0x04, 0x5b, 0x01])
+	assert.deepEqual(COMMANDS.cam_gamma.choices.PQ, [0x01, 0x04, 0x5b, 0x02])
+	assert.deepEqual(COMMANDS.cam_gamma.choices['S-Log3'], [0x01, 0x04, 0x5b, 0x03])
+})
+
+test('cam_flicker enum choices (Off/50Hz/60Hz)', () => {
+	assert.deepEqual(COMMANDS.cam_flicker.choices.Off, [0x01, 0x04, 0x23, 0x00])
+	assert.deepEqual(COMMANDS.cam_flicker.choices['50Hz'], [0x01, 0x04, 0x23, 0x01])
+	assert.deepEqual(COMMANDS.cam_flicker.choices['60Hz'], [0x01, 0x04, 0x23, 0x02])
+})
+
+// cam_lr_reverse (0x61) and cam_picture_flip (0x66) each toggle one bit of
+// the same `flip` value that cam_flip's 4-state direct select already
+// reaches in one command -- the firmware still answers both for other
+// controllers, but they're deliberately not exposed in Companion.
+test('cam_lr_reverse and cam_picture_flip are deliberately not exposed (cam_flip already reaches every state)', () => {
+	assert.equal(COMMANDS.cam_lr_reverse, undefined)
+	assert.equal(COMMANDS.cam_picture_flip, undefined)
+	assert.equal(INQUIRIES.lr_reverse, undefined)
+	assert.equal(INQUIRIES.picture_flip, undefined)
+})
+
+test("cam_wb has no separate 'One Push' choice (it's a pure duplicate of Manual -- both send \"awb 0\")", () => {
+	assert.equal(COMMANDS.cam_wb.choices['One Push'], undefined)
+	assert.deepEqual(COMMANDS.cam_wb.choices.Manual, [0x01, 0x04, 0x35, 0x05])
+})
+
+// --- color_temp_direct (unsigned raw preset index, no Kelvin matching) ------
+
+test('Color Temp (direct) round-trips a raw preset index (unsigned, 2 nibbles)', () => {
+	assert.equal(COMMANDS.color_temp_direct.nibbles, 2)
+	assert.equal(COMMANDS.color_temp_direct.signed, undefined)
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.color_temp_direct.prefix, ...encodeNibbles(3, 2)])],
+		[0x81, 0x01, 0x04, 0x20, 0x00, 0x00, 0x00, 0x03, 0xff],
+	)
+})
+
+test("continuousParams' Color Temp entry is narrowed to 0-9 (largest calibration profile), not the wire's full 0-255", () => {
+	const p = continuousParams().find((x) => x.id === 'color_temp_direct')
+	assert.equal(p.min, 0)
+	assert.equal(p.max, 9)
 })

@@ -214,14 +214,15 @@ class DctViscaInstance extends InstanceBase {
 				a.options = [{ type: 'dropdown', id: 'choice', label: c.name, default: ids[0], choices: ids.map((x) => ({ id: x, label: x })) }]
 				a.callback = (ev) => this.send(c.choices[ev.options.choice])
 			} else if (c.kind === 'rud') {
-				a.options = [{ type: 'dropdown', id: 'choice', label: 'Action', default: 'up', choices: Object.keys(RUD).map((x) => ({ id: x, label: x })) }]
+				const rudChoices = c.rudChoices ?? Object.keys(RUD)
+				a.options = [{ type: 'dropdown', id: 'choice', label: 'Action', default: rudChoices[0], choices: rudChoices.map((x) => ({ id: x, label: x })) }]
 				a.callback = (ev) => this.send([0x01, 0x04, c.func, RUD[ev.options.choice]])
 			} else if (c.kind === 'direct') {
 				const bits = 4 * c.nibbles
-				const max = c.signed ? (1 << (bits - 1)) - 1 : (1 << bits) - 1
-				const min = c.signed ? -(1 << (bits - 1)) : 0
+				const max = c.max ?? (c.signed ? (1 << (bits - 1)) - 1 : (1 << bits) - 1)
+				const min = c.min ?? (c.signed ? -(1 << (bits - 1)) : 0)
 				const mask = (1 << bits) - 1
-				a.options = [{ type: 'number', id: 'value', label: `Value (${min}-${max})`, default: 0, min, max }]
+				a.options = [{ type: 'number', id: 'value', label: `Value (${min}-${max})`, default: min, min, max }]
 				a.callback = (ev) => this.send([...c.prefix, ...encodeNibbles(Number(ev.options.value) & mask, c.nibbles)])
 			} else if (c.kind === 'fixed') {
 				a.callback = () => this.send(c.bytes)
@@ -265,7 +266,7 @@ class DctViscaInstance extends InstanceBase {
 					presets[`${id}_${choice}`] = btn(c.group, `${c.name}: ${choice}`, `${c.name}\\n${choice}`, id, { choice })
 				}
 			} else if (c.kind === 'rud') {
-				for (const choice of Object.keys(RUD)) {
+				for (const choice of c.rudChoices ?? Object.keys(RUD)) {
 					presets[`${id}_${choice}`] = btn(c.group, `${c.name}: ${choice}`, `${c.name}\\n${choice}`, id, { choice })
 				}
 			} else if (c.kind === 'fixed') {
