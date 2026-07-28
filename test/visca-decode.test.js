@@ -60,7 +60,9 @@ test('signed direct-set (Color Hue) decodes the wire byte as negative, not as it
 })
 
 test('signed inquiry reply (Color Hue) decodes the wire byte as negative', () => {
-	const lines = parseLines(`${tx([0x09, 0x04, 0x4f])}\n${rx([0x50, ...encodeNibbles(-5 & 0xff, 2)])}`)
+	// Real hardware pads to "00 00 0p 0q" (reply_pq, visca_map_picture.c),
+	// not a bare 2-nibble reply -- this must still decode correctly.
+	const lines = parseLines(`${tx([0x09, 0x04, 0x4f])}\n${rx([0x50, 0x00, 0x00, ...encodeNibbles(-5 & 0xff, 2)])}`)
 	const entries = decodeDump(lines)
 	assert.match(entries[1].companion, /Color Hue = -5/)
 	assert.equal(entries[1].provideo, 'post_hue')
@@ -165,7 +167,7 @@ test('rud command (Gain) supports the full Reset/Up/Down structure via firmware 
 
 test('rud command (Shutter) supports the full Reset/Up/Down structure via firmware read-modify-write', () => {
 	const reset = decodeDump(parseLines(tx([0x01, 0x04, 0x0a, 0x00])))
-	assert.equal(reset[0].provideo, 'cam_exposure 10000')
+	assert.equal(reset[0].provideo, 'cam_exposure 1000')
 
 	const up = decodeDump(parseLines(tx([0x01, 0x04, 0x0a, 0x02])))
 	assert.match(up[0].provideo, /read-modify-write \(\+93us\)/)
@@ -185,9 +187,10 @@ test('enum command with a per-choice ProVideo mapping (White Balance -> Indoor)'
 	assert.equal(entries[0].provideo, 'wb_preset 1')
 })
 
-test('enum command not handled by any firmware dispatcher reports as such', () => {
+test("cam_wb's Color Temp choice explains why it errors (wb_preset is real, this path just can't carry an index)", () => {
 	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x35, 0x20]))) // Color Temp
-	assert.match(entries[0].provideo, /not implemented in current firmware \(Color Temp unsupported\)/)
+	assert.match(entries[0].provideo, /wb_preset is real/)
+	assert.match(entries[0].provideo, /Color Temp \(direct\)/)
 })
 
 test('cam_bright (RUD) supports Reset/Up/Down via read-modify-write of post_bright', () => {
@@ -208,6 +211,14 @@ test('Bright (direct) decodes a negative signed value (post_bright)', () => {
 test('the standard "CAM_Brightness" function (0xA1) is a pure duplicate of cam_bright_direct and is not decoded (not exposed in Companion)', () => {
 	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0xa1, 0x00, 0x00, ...encodeNibbles(-5 & 0xff, 2)])))
 	assert.equal(entries[0].provideo, '(no ProVideo mapping known)')
+})
+
+test('signed inquiry reply (Bright) decodes the wire byte as negative, not the padded 251', () => {
+	// Same padded-reply caveat as Color Hue's inquiry above.
+	const lines = parseLines(`${tx([0x09, 0x04, 0x4d])}\n${rx([0x50, 0x00, 0x00, ...encodeNibbles(-5 & 0xff, 2)])}`)
+	const entries = decodeDump(lines)
+	assert.match(entries[1].companion, /Bright = -5/)
+	assert.equal(entries[1].provideo, 'post_bright')
 })
 
 test('cam_gamma maps directly to log_mode', () => {
@@ -236,6 +247,33 @@ test('color_temp_direct is a raw wb_preset index passthrough, not a Kelvin value
 	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x20, 0x00, 0x00, ...encodeNibbles(3, 2)])))
 	assert.match(entries[0].companion, /Color Temp \(direct\) = 3/)
 	assert.equal(entries[0].provideo, 'wb_preset 3')
+})
+
+test('cam_settings_reset now maps to reset_settings (confirmed reachable on real hardware); cam_settings_save is still unimplemented', () => {
+	const reset = decodeDump(parseLines(tx([0x01, 0x04, 0xa0, 0x10])))
+	assert.equal(reset[0].provideo, 'reset_settings')
+
+	const save = decodeDump(parseLines(tx([0x01, 0x04, 0xa5, 0x10])))
+	assert.match(save[0].provideo, /not implemented in current firmware \(func 0xA5 unhandled\)/)
+})
+
+test('S-Log3 Master Gain (direct) decodes a negative signed value, not the wire-range full 0-255', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x09, ...encodeNibbles(-6 & 0xff, 2)])))
+	assert.match(entries[0].companion, /S-Log3 Master Gain = -6/)
+	assert.match(entries[0].provideo, /^slog3_master_gain <raw=-6>/)
+	assert.match(entries[0].provideo, /real range is signed -6\.\.12 dB/)
+})
+
+test('SDI Black/White (direct) decode negative signed values, not the wire-range full 0-255', () => {
+	const black = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x31, ...encodeNibbles(-60 & 0xff, 2)])))
+	assert.match(black[0].companion, /SDI Black = -60/)
+	assert.match(black[0].provideo, /^sdi_black <raw=-60>/)
+	assert.match(black[0].provideo, /real range is signed -60\.\.60/)
+
+	const white = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x32, ...encodeNibbles(-80 & 0xff, 2)])))
+	assert.match(white[0].companion, /SDI White = -80/)
+	assert.match(white[0].provideo, /^sdi_white <raw=-80>/)
+	assert.match(white[0].provideo, /real range is signed -80\.\.79/)
 })
 
 test('translate() returns a clear message for a frame with no table entry at all', () => {

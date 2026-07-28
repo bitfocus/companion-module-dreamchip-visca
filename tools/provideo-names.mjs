@@ -27,7 +27,6 @@
 export const PROVIDEO_NAMES = {
 	// --- category 0x00/0x04 standard VISCA (visca_map_system.c) -------------
 	if_clear: { cmd: null, note: 'protocol IF_Clear ack only, not a ProVideo command' },
-	cam_power: { choices: { On: 'low_power 0', Off: 'low_power 1' } },
 	cam_system: { cmd: null, note: 'video-mode dialect is conditional/interop-specific (CONFIG_VISCA_CMD_LENS_STUB); see visca_map_system.c, not a flat mapping' },
 
 	// --- category 0x04 exposure (visca_map_exposure.c) ----------------------
@@ -44,7 +43,7 @@ export const PROVIDEO_NAMES = {
 		scaled: true,
 		note: 'real range is 1000-45715 (1x/0dB/140 ISO min; max from the current AUTO gain-mode range); raw is 0-4095, linearly scaled, not a placeholder',
 	},
-	cam_shutter: { cmd: 'cam_exposure', rud: { reset: 'cam_exposure 10000', up: 'read-modify-write (+93us)', down: 'read-modify-write (-93us)' } },
+	cam_shutter: { cmd: 'cam_exposure', rud: { reset: 'cam_exposure 1000', up: 'read-modify-write (+93us)', down: 'read-modify-write (-93us)' } },
 	cam_shutter_direct: {
 		cmd: 'cam_exposure',
 		scaled: true,
@@ -63,7 +62,13 @@ export const PROVIDEO_NAMES = {
 		choices: {
 			Auto: 'awb 1', Indoor: 'wb_preset 1', Outdoor: 'wb_preset 2',
 			Manual: 'awb 0', Trigger: 'wb',
-			'Color Temp': null, // not handled by wb_command's switch — falls to -ENOTSUP
+			// wb_preset is a real, working command (see Indoor/Outdoor above and
+			// color_temp_direct/"Color Temp (direct)", which sets it directly) --
+			// but THIS VISCA path (func 0x35, data 0x20) is a single byte with no
+			// room to carry a preset index, so wb_command's switch has nothing to
+			// act on and always falls through to -ENOTSUP. Use Color Temp (direct)
+			// to actually select a preset.
+			'Color Temp': "wb_preset is real (see Color Temp (direct)), but this VISCA path (func 0x35 data 0x20) has no room for a preset index -- always errors",
 		},
 	},
 	wb_mode: { cmd: 'awb', scaled: false, note: 'readback only distinguishes Auto/Manual, not preset/trigger detail' },
@@ -116,14 +121,13 @@ export const PROVIDEO_NAMES = {
 	// the function code yet — the camera will reply 0x60/0x41.)
 	cam_memory: { cmd: null, note: 'not implemented in current firmware (func 0x3F unhandled)' },
 	cam_settings_save: { cmd: null, note: 'not implemented in current firmware (func 0xA5 unhandled)' },
-	cam_settings_reset: { cmd: null, note: 'not implemented in current firmware (func 0xA0 unhandled)' },
+	cam_settings_reset: { cmd: 'reset_settings', scaled: false },
 	// SET works (raw wb_preset index passthrough -- no ProVideo command
 	// accepts a settable Kelvin value, only stat_cct exists and it's
 	// read-only AWB telemetry). INQUIRY has no data source: the currently
 	// active preset index is never exposed via any text command.
 	color_temp: { cmd: null, note: "no way to read back the current wb_preset index; SET works, see COMMANDS.color_temp_direct" },
 	video_mode: { cmd: null, note: 'video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping' },
-	power: { cmd: 'low_power', scaled: false, note: 'reachability implies On; see visca_map_system.c cam_power_inq' },
 	version: { cmd: null, note: 'static identity reply, not a ProVideo command' },
 
 	// --- category 0x7E Dream Chip vendor extensions (visca_map_dct_ext.c) ---
@@ -172,8 +176,12 @@ export const PROVIDEO_NAMES = {
 		scaled: true,
 		note: "sets flare's positional arg 3 (blue), real range 0-65535, via read-modify-write of all 3 args; raw is 0-4095, firmware multiplies it by 16",
 	},
-	dct_awb_speed: { cmd: 'awb_speed', scaled: false },
-	dct_slog3_gain: { cmd: 'slog3_master_gain', scaled: false },
+	dct_awb_speed: { cmd: 'awb_speed', scaled: true, note: 'real range is 0-2; do_awb_speed hard-rejects raw values above 2 with -EINVAL (unlike filter_detail, which clamps instead of erroring)' },
+	dct_slog3_gain: {
+		cmd: 'slog3_master_gain',
+		scaled: true,
+		note: 'real range is signed -6..12 dB (system_settings.h); do_slog3_master_gain hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled',
+	},
 	dct_cnr_mode: { cmd: 'cnr_mode', scaled: false },
 	dct_cnr_auto: { cmd: 'cnr_auto', scaled: false },
 	dct_dpf_enable: { cmd: 'dpf_enable', scaled: false },
@@ -185,7 +193,7 @@ export const PROVIDEO_NAMES = {
 		note: 'real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring',
 	},
 	dct_filter_denoise: { cmd: 'filter_denoise', scaled: false },
-	dct_color_space: { cmd: 'color_space', scaled: false },
+	dct_color_space: { cmd: 'color_space', scaled: true, note: 'real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP' },
 	dct_tm_mode: { cmd: 'tm_mode', scaled: false },
 	dct_pq_max_bright: {
 		cmd: 'pq_max_brightness',
@@ -193,12 +201,12 @@ export const PROVIDEO_NAMES = {
 		note: 'real range is 100-10000 cd/m2 (do_pq_max_brightness); raw is 0-4095, linearly scaled, not a placeholder',
 	},
 	dct_mcc_opmode: { cmd: 'mcc_opmode', scaled: false },
-	dct_lut_mode: { cmd: 'lut_mode', scaled: false },
+	dct_lut_mode: { cmd: 'lut_mode', scaled: true, note: 'real settable range is 0-1 (Interpolate/Fast Gamma, lut_drv.h); do_lut_mode rejects LUT_MODE_FIXED=2 with -EINVAL ("used only internally")' },
 	dct_lut_fixed_mode: { cmd: 'lut_fixed_mode', scaled: false },
 	dct_lut_preset: { cmd: 'lut_preset', scaled: false },
 	dct_sdi_range: { cmd: 'sdi_range', scaled: false },
-	dct_sdi_black: { cmd: 'sdi_black', scaled: false },
-	dct_sdi_white: { cmd: 'sdi_white', scaled: false },
+	dct_sdi_black: { cmd: 'sdi_black', scaled: true, note: 'real range is signed -60..60; do_sdi_black hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled' },
+	dct_sdi_white: { cmd: 'sdi_white', scaled: true, note: 'real range is signed -80..79; do_sdi_white hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled' },
 	dct_osd: { cmd: 'osd', scaled: false },
 	dct_audio_enable: { cmd: 'audio_enable', scaled: false },
 	dct_audio_gain: {

@@ -269,6 +269,17 @@ test('decodeReply reinterprets a signed value decode as negative', () => {
 	assert.equal(decodeReply({ type: 'value' }, [0x0f, 0x0b]), '251', 'non-signed decode is unaffected')
 })
 
+test('decodeReply uses decode.nibbles (not the padded payload length) for signed bit-width', () => {
+	// Real hardware (reply_pq, visca_map_picture.c) always pads post_hue's/
+	// post_bright's inquiry reply to 4 bytes ("00 00 0p 0q") even though the
+	// real value is only 2 nibbles wide. Without an explicit nibbles count,
+	// toSigned(raw, payload.length) would treat this as a 16-bit value and
+	// never see the 8-bit sign bit -- silently reporting -5 as 251 instead.
+	const padded = [0x00, 0x00, 0x0f, 0x0b] // -5, as an 8-bit value, padded to 4 bytes
+	assert.equal(decodeReply({ type: 'value', signed: true, nibbles: 2 }, padded), '-5')
+	assert.equal(decodeReply({ type: 'value', signed: true }, padded), '251', 'without nibbles, padding breaks the sign bit')
+})
+
 test("continuousParams' Color Hue entry has a signed -128..127 range", () => {
 	const hue = continuousParams().find((p) => p.id === 'cam_color_hue_direct')
 	assert.equal(hue.signed, true)
@@ -447,6 +458,12 @@ test("cam_wb has no separate 'One Push' choice (it's a pure duplicate of Manual 
 	assert.deepEqual(COMMANDS.cam_wb.choices.Manual, [0x01, 0x04, 0x35, 0x05])
 })
 
+test('cam_power is not exposed (low_power 1 reboots the device and fails on real hardware -- save_boot_settings error)', () => {
+	assert.equal(COMMANDS.cam_power, undefined)
+	assert.equal(INQUIRIES.power, undefined)
+	assert.equal(ENUM.power, undefined)
+})
+
 // --- color_temp_direct (unsigned raw preset index, no Kelvin matching) ------
 
 test('Color Temp (direct) round-trips a raw preset index (unsigned, 2 nibbles)', () => {
@@ -462,4 +479,71 @@ test("continuousParams' Color Temp entry is narrowed to 0-9 (largest calibration
 	const p = continuousParams().find((x) => x.id === 'color_temp_direct')
 	assert.equal(p.min, 0)
 	assert.equal(p.max, 9)
+})
+
+test("continuousParams' AWB Speed entry is narrowed to 0-2 (do_awb_speed hard-rejects >2), not the wire's full 0-15", () => {
+	const p = continuousParams().find((x) => x.id === 'dct_awb_speed')
+	assert.equal(p.min, 0)
+	assert.equal(p.max, 2)
+})
+
+test('S-Log3 Master Gain (direct) is signed, -6..12 (do_slog3_master_gain hard-rejects outside that)', () => {
+	assert.equal(COMMANDS.dct_slog3_gain.nibbles, 2)
+	assert.equal(COMMANDS.dct_slog3_gain.signed, true)
+	// -6 as an 8-bit two's-complement value is 0xFA -> nibbles [0xF, 0xA]
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.dct_slog3_gain.prefix, ...encodeNibbles(-6 & 0xff, 2)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x09, 0x0f, 0x0a, 0xff],
+	)
+})
+
+test("continuousParams' S-Log3 Master Gain entry is narrowed to -6..12, not the wire's full signed -128..127", () => {
+	const p = continuousParams().find((x) => x.id === 'dct_slog3_gain')
+	assert.equal(p.signed, true)
+	assert.equal(p.min, -6)
+	assert.equal(p.max, 12)
+})
+
+test("continuousParams' Color Space entry is narrowed to 0-2 (do_color_space hard-rejects outside that), not the wire's full 0-15", () => {
+	const p = continuousParams().find((x) => x.id === 'dct_color_space')
+	assert.equal(p.min, 0)
+	assert.equal(p.max, 2)
+})
+
+test("continuousParams' LUT Mode entry is narrowed to 0-1 (LUT_MODE_FIXED=2 is rejected), not the wire's full 0-15", () => {
+	const p = continuousParams().find((x) => x.id === 'dct_lut_mode')
+	assert.equal(p.min, 0)
+	assert.equal(p.max, 1)
+})
+
+test('SDI Black (direct) is signed, -60..60 (do_sdi_black hard-rejects outside that)', () => {
+	assert.equal(COMMANDS.dct_sdi_black.nibbles, 2)
+	assert.equal(COMMANDS.dct_sdi_black.signed, true)
+	// -60 as an 8-bit two's-complement value is 0xC4 -> nibbles [0xC, 0x4]
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.dct_sdi_black.prefix, ...encodeNibbles(-60 & 0xff, 2)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x31, 0x0c, 0x04, 0xff],
+	)
+})
+
+test('SDI White (direct) is signed, -80..79 (do_sdi_white hard-rejects outside that)', () => {
+	assert.equal(COMMANDS.dct_sdi_white.nibbles, 2)
+	assert.equal(COMMANDS.dct_sdi_white.signed, true)
+	// -80 as an 8-bit two's-complement value is 0xB0 -> nibbles [0xB, 0x0]
+	assert.deepEqual(
+		[...buildFrame(1, [...COMMANDS.dct_sdi_white.prefix, ...encodeNibbles(-80 & 0xff, 2)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x32, 0x0b, 0x00, 0xff],
+	)
+})
+
+test("continuousParams' SDI Black/White entries are narrowed to their real signed ranges, not the wire's full signed -128..127", () => {
+	const black = continuousParams().find((x) => x.id === 'dct_sdi_black')
+	assert.equal(black.signed, true)
+	assert.equal(black.min, -60)
+	assert.equal(black.max, 60)
+
+	const white = continuousParams().find((x) => x.id === 'dct_sdi_white')
+	assert.equal(white.signed, true)
+	assert.equal(white.min, -80)
+	assert.equal(white.max, 79)
 })

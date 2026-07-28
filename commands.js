@@ -14,7 +14,6 @@ export const TERMINATOR = 0xff
 
 // --- shared enum maps (reply byte -> label) --------------------------------
 export const ENUM = {
-	power: { 0x02: 'On', 0x03: 'Off (Standby)', 0x04: 'Power Circuit Error' },
 	wb: { 0x00: 'Auto', 0x01: 'Indoor', 0x02: 'Outdoor', 0x03: 'OnePush', 0x05: 'Manual', 0x20: 'ColorTemp' },
 	ae: { 0x00: 'FullAuto', 0x03: 'Manual', 0x0a: 'ShutterPriority' },
 	gamma: { 0x00: 'BT709', 0x01: 'HLG', 0x02: 'PQ', 0x03: 'SLOG3' },
@@ -73,7 +72,14 @@ export function decodeReply(decode, payload) {
 		}
 		case 'value': {
 			const raw = decodeNibbles(payload)
-			return String(decode.signed ? toSigned(raw, payload.length) : raw)
+			// `decode.nibbles`, not `payload.length`: some real inquiry replies
+			// (e.g. post_hue/post_bright, via reply_pq in visca_map_picture.c)
+			// always pad to a fixed "00 00 0p 0q" 4-byte shape even though the
+			// real value is only 2 nibbles wide -- using the padded byte count
+			// as the two's-complement bit-width would misread negative values
+			// as large positive ones.
+			const bits = decode.nibbles ?? payload.length
+			return String(decode.signed ? toSigned(raw, bits) : raw)
 		}
 		case 'system': {
 			if (payload.length >= 4) {
@@ -101,9 +107,6 @@ export const COMMANDS = {
 	if_clear: { name: 'IF Clear', group: 'System', kind: 'fixed', bytes: P(0x01, 0x00, 0x01) },
 	cam_settings_save: { name: 'Settings Save', group: 'System', kind: 'fixed', bytes: P(0x01, 0x04, 0xa5, 0x10) },
 	cam_settings_reset: { name: 'Settings Reset', group: 'System', kind: 'fixed', bytes: P(0x01, 0x04, 0xa0, 0x10) },
-
-	// Power
-	cam_power: { name: 'Power', group: 'Power', kind: 'enum', choices: { On: P(0x01, 0x04, 0x00, 0x02), Off: P(0x01, 0x04, 0x00, 0x03) } },
 
 	// Video mode (see SYSTEM dialect caveat)
 	cam_system: { name: 'Video Mode', group: 'Video', kind: 'video' },
@@ -212,12 +215,15 @@ export const COMMANDS = {
 
 	// --- DCT vendor extensions (category 0x7E, sub 0x01) ---------------------
 	// Payloads are `01 7E 01 SS ...` (Dream Chip vendor extensions).
+	// Grouped with White Balance (not DCT Gain) to match cam_rgain/cam_bgain --
+	// all three are the same "per-channel WB gain" control; only its protocol
+	// origin (DCT vendor extension, no standard-VISCA equivalent) differs.
 	dct_ggain: {
-		name: 'Green Gain', group: 'DCT Gain', kind: 'enum',
+		name: 'Green Gain', group: 'White Balance', kind: 'enum',
 		choices: { Reset: P(0x01, 0x7e, 0x01, 0x01, 0x00), Up: P(0x01, 0x7e, 0x01, 0x01, 0x02), Down: P(0x01, 0x7e, 0x01, 0x01, 0x03) },
 	},
 	// gain_green's real range is 0-4095 (ISP_AWB_GAIN_MAX); widened to 3 nibbles.
-	dct_ggain_direct: { name: 'Green Gain (direct)', group: 'DCT Gain', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x01, 0x00, 0x00), nibbles: 3 },
+	dct_ggain_direct: { name: 'Green Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x01, 0x00, 0x00), nibbles: 3 },
 	dct_gain_mode: {
 		name: 'Gain Mode', group: 'DCT Gain', kind: 'enum',
 		choices: { Auto: P(0x01, 0x7e, 0x01, 0x02, 0x00), LCG: P(0x01, 0x7e, 0x01, 0x02, 0x01), HCG: P(0x01, 0x7e, 0x01, 0x02, 0x02) },
@@ -244,9 +250,21 @@ export const COMMANDS = {
 	dct_flare_red: { name: 'Flare Red', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x07), nibbles: 3 },
 	dct_flare_green: { name: 'Flare Green', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1b), nibbles: 3 },
 	dct_flare_blue: { name: 'Flare Blue', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1c), nibbles: 3 },
-	dct_awb_speed: { name: 'AWB Speed', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x08), nibbles: 1 },
-	dct_slog3_gain: { name: 'S-Log3 Master Gain', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x09), nibbles: 2 },
-	dct_color_space: { name: 'Color Space', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x17), nibbles: 1 },
+	// awb_speed's real range is 0-2 (do_awb_speed hard-rejects >2 with
+	// -EINVAL); `max` narrows the Companion-side UI/knob range to what's
+	// actually valid instead of the wire's full 1-nibble 0-15 capacity.
+	dct_awb_speed: { name: 'AWB Speed', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x08), nibbles: 1, min: 0, max: 2 },
+	// slog3_master_gain's real range is signed -6..12 dB (system_settings.h;
+	// do_slog3_master_gain hard-rejects outside that with -EINVAL). Signed to
+	// match the BSP's bespoke two's-complement handling (it's no longer a
+	// generic unsigned DCT_VALUE passthrough); `min`/`max` narrow the
+	// Companion-side UI/knob range from the wire's full signed -128..127.
+	dct_slog3_gain: { name: 'S-Log3 Master Gain', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x09), nibbles: 2, signed: true, min: -6, max: 12 },
+	// color_space's real range is 0-2 (COLOR_SPACE_REC709/REC2020/
+	// S_GAMUT3_CINE, isp_drv.h; do_color_space hard-rejects outside 0-2 with
+	// -EOPNOTSUPP); `max` narrows the Companion-side UI/knob range from the
+	// wire's full 1-nibble 0-15 capacity.
+	dct_color_space: { name: 'Color Space', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x17), nibbles: 1, min: 0, max: 2 },
 	dct_tm_mode: { name: 'Tone-Mapping Mode', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x21), nibbles: 1 },
 	// pq_max_brightness's real range is 100-10000 cd/m2 (do_pq_max_brightness);
 	// widened to 3 nibbles (0-4095) for ~2.4 cd/m2 per step, matching the BSP.
@@ -268,14 +286,25 @@ export const COMMANDS = {
 	// widened to 2 nibbles to match it exactly.
 	dct_filter_denoise: { name: 'Filter Denoise', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x16), nibbles: 2 },
 
-	dct_lut_mode: { name: 'LUT Mode', group: 'DCT LUT', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x24), nibbles: 1 },
+	// lut_mode's real settable range is 0-1 (LUT_MODE_INTERPOLATE/FAST_GAMMA,
+	// lut_drv.h); LUT_MODE_FIXED=2 exists in the enum but do_lut_mode
+	// explicitly rejects it with -EINVAL ("used only internally"). `max`
+	// narrows the Companion-side UI/knob range from the wire's full 0-15.
+	dct_lut_mode: { name: 'LUT Mode', group: 'DCT LUT', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x24), nibbles: 1, min: 0, max: 1 },
 	dct_lut_fixed_mode: { name: 'LUT Fixed Mode', group: 'DCT LUT', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x25), nibbles: 1 },
 	dct_lut_preset: { name: 'LUT Preset', group: 'DCT LUT', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x26), nibbles: 1 },
 
 	// do_sdi_range's own help text: "<flag> - set sdi range [0: legal, 1: full range]"
 	dct_sdi_range: { name: 'SDI Range', group: 'DCT SDI', kind: 'enum', choices: { Legal: P(0x01, 0x7e, 0x01, 0x30, 0x00), Full: P(0x01, 0x7e, 0x01, 0x30, 0x01) } },
-	dct_sdi_black: { name: 'SDI Black', group: 'DCT SDI', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x31), nibbles: 2 },
-	dct_sdi_white: { name: 'SDI White', group: 'DCT SDI', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x32), nibbles: 2 },
+	// sdi_black's real range is signed -60..60 (do_sdi_black hard-rejects
+	// outside that with -EINVAL). Signed to match the BSP's bespoke two's-
+	// complement handling (it's no longer a generic unsigned DCT_VALUE
+	// passthrough, same fix as dct_slog3_gain); `min`/`max` narrow the
+	// Companion-side UI/knob range from the wire's full signed -128..127.
+	dct_sdi_black: { name: 'SDI Black', group: 'DCT SDI', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x31), nibbles: 2, signed: true, min: -60, max: 60 },
+	// sdi_white's real range is signed -80..79 (do_sdi_white hard-rejects
+	// outside that with -EINVAL); same treatment as sdi_black above.
+	dct_sdi_white: { name: 'SDI White', group: 'DCT SDI', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x32), nibbles: 2, signed: true, min: -80, max: 79 },
 
 	dct_osd: { name: 'OSD', group: 'DCT OSD/Audio', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x52, 0x00), On: P(0x01, 0x7e, 0x01, 0x52, 0x01) } },
 	dct_audio_enable: { name: 'Audio Enable', group: 'DCT OSD/Audio', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x65, 0x00), On: P(0x01, 0x7e, 0x01, 0x65, 0x01) } },
@@ -310,7 +339,6 @@ export const COMMANDS = {
 // --- INQUIRIES (read-back) -------------------------------------------------
 export const INQUIRIES = {
 	version: { name: 'Version', varId: 'version', payload: P(0x09, 0x00, 0x02), decode: { type: 'version' } },
-	power: { name: 'Power', varId: 'power', payload: P(0x09, 0x04, 0x00), decode: { type: 'enum', map: ENUM.power } },
 	video_mode: { name: 'Video Mode', varId: 'video_mode', payload: P(0x09, 0x04, 0x24), decode: { type: 'system' } },
 	ae_mode: { name: 'AE Mode', varId: 'ae_mode', payload: P(0x09, 0x04, 0x39), decode: { type: 'enum', map: ENUM.ae } },
 	gain: { name: 'Gain', varId: 'gain', payload: P(0x09, 0x04, 0x4c), decode: { type: 'value' } },
@@ -320,9 +348,13 @@ export const INQUIRIES = {
 	bgain: { name: 'Blue Gain', varId: 'bgain', payload: P(0x09, 0x04, 0x44), decode: { type: 'value' } },
 	color_temp: { name: 'Color Temp', varId: 'color_temp', payload: P(0x09, 0x04, 0x20), decode: { type: 'value' } },
 	color_gain: { name: 'Color Gain', varId: 'color_gain', payload: P(0x09, 0x04, 0x49), decode: { type: 'value' } },
-	color_hue: { name: 'Color Hue', varId: 'color_hue', payload: P(0x09, 0x04, 0x4f), decode: { type: 'value', signed: true } },
+	// nibbles:2 -- the real reply pads to "00 00 0p 0q" (reply_pq,
+	// visca_map_picture.c), so the two's-complement bit-width must be
+	// declared explicitly rather than inferred from the padded byte count.
+	color_hue: { name: 'Color Hue', varId: 'color_hue', payload: P(0x09, 0x04, 0x4f), decode: { type: 'value', signed: true, nibbles: 2 } },
 	gamma: { name: 'Gamma', varId: 'gamma', payload: P(0x09, 0x04, 0x5b), decode: { type: 'enum', map: ENUM.gamma } },
-	bright: { name: 'Bright', varId: 'bright', payload: P(0x09, 0x04, 0x4d), decode: { type: 'value', signed: true } },
+	// nibbles:2 -- same padded-reply caveat as color_hue above.
+	bright: { name: 'Bright', varId: 'bright', payload: P(0x09, 0x04, 0x4d), decode: { type: 'value', signed: true, nibbles: 2 } },
 	contrast: { name: 'Contrast', varId: 'contrast', payload: P(0x09, 0x04, 0xa2), decode: { type: 'value' } },
 	flicker: { name: 'Flicker', varId: 'flicker', payload: P(0x09, 0x04, 0x55), decode: { type: 'enum', map: ENUM.flicker } },
 	flip: { name: 'Flip', varId: 'flip', payload: P(0x09, 0x04, 0xa4), decode: { type: 'enum', map: ENUM.flip } },
@@ -338,7 +370,7 @@ export const INQUIRIES = {
 	dct_flare_green: { name: 'Flare Green', varId: 'dct_flare_green', payload: P(0x09, 0x7e, 0x01, 0x1b), decode: { type: 'value' } },
 	dct_flare_blue: { name: 'Flare Blue', varId: 'dct_flare_blue', payload: P(0x09, 0x7e, 0x01, 0x1c), decode: { type: 'value' } },
 	dct_awb_speed: { name: 'AWB Speed', varId: 'dct_awb_speed', payload: P(0x09, 0x7e, 0x01, 0x08), decode: { type: 'value' } },
-	dct_slog3_gain: { name: 'S-Log3 Master Gain', varId: 'dct_slog3_gain', payload: P(0x09, 0x7e, 0x01, 0x09), decode: { type: 'value' } },
+	dct_slog3_gain: { name: 'S-Log3 Master Gain', varId: 'dct_slog3_gain', payload: P(0x09, 0x7e, 0x01, 0x09), decode: { type: 'value', signed: true } },
 	dct_cnr_mode: { name: 'CNR Mode', varId: 'dct_cnr_mode', payload: P(0x09, 0x7e, 0x01, 0x10), decode: { type: 'value' } },
 	dct_cnr_auto: { name: 'CNR Auto', varId: 'dct_cnr_auto', payload: P(0x09, 0x7e, 0x01, 0x11), decode: { type: 'enum', map: ENUM.dct_onoff } },
 	dct_dpf_enable: { name: 'DPF Enable', varId: 'dct_dpf_enable', payload: P(0x09, 0x7e, 0x01, 0x12), decode: { type: 'enum', map: ENUM.dct_onoff } },
@@ -353,8 +385,8 @@ export const INQUIRIES = {
 	dct_lut_fixed_mode: { name: 'LUT Fixed Mode', varId: 'dct_lut_fixed_mode', payload: P(0x09, 0x7e, 0x01, 0x25), decode: { type: 'value' } },
 	dct_lut_preset: { name: 'LUT Preset', varId: 'dct_lut_preset', payload: P(0x09, 0x7e, 0x01, 0x26), decode: { type: 'value' } },
 	dct_sdi_range: { name: 'SDI Range', varId: 'dct_sdi_range', payload: P(0x09, 0x7e, 0x01, 0x30), decode: { type: 'enum', map: ENUM.dct_sdi_range } },
-	dct_sdi_black: { name: 'SDI Black', varId: 'dct_sdi_black', payload: P(0x09, 0x7e, 0x01, 0x31), decode: { type: 'value' } },
-	dct_sdi_white: { name: 'SDI White', varId: 'dct_sdi_white', payload: P(0x09, 0x7e, 0x01, 0x32), decode: { type: 'value' } },
+	dct_sdi_black: { name: 'SDI Black', varId: 'dct_sdi_black', payload: P(0x09, 0x7e, 0x01, 0x31), decode: { type: 'value', signed: true } },
+	dct_sdi_white: { name: 'SDI White', varId: 'dct_sdi_white', payload: P(0x09, 0x7e, 0x01, 0x32), decode: { type: 'value', signed: true } },
 	dct_mcc_opmode: { name: 'MCC Op-Mode', varId: 'dct_mcc_opmode', payload: P(0x09, 0x7e, 0x01, 0x40), decode: { type: 'value' } },
 	dct_osd: { name: 'OSD', varId: 'dct_osd', payload: P(0x09, 0x7e, 0x01, 0x52), decode: { type: 'enum', map: ENUM.dct_onoff } },
 	dct_auto_save: { name: 'Auto Save', varId: 'dct_auto_save', payload: P(0x09, 0x7e, 0x01, 0x62), decode: { type: 'enum', map: ENUM.dct_onoff } },

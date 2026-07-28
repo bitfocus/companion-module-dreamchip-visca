@@ -5,7 +5,8 @@
   "main": "main.js",
   "description": "Control Dream Chip cameras over VISCA",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "test:hardware": "node tools/camera-check.mjs"
   },
   "license": "MIT",
   "dependencies": {
