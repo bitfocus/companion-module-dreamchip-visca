@@ -5,7 +5,7 @@ command/effect each Companion action or inquiry maps to). Check off each row
 after verifying it against real hardware; use Comments for anything
 unexpected (error code, wrong value, etc.).
 
-Total: 143 command test cases, 52 inquiries.
+Total: 143 command test cases, 55 inquiries.
 
 An automated equivalent of this plan lives at `tools/camera-check.mjs` -- it
 sends the same commands over a real serial connection and validates the
@@ -135,6 +135,7 @@ value for a representative sample rather than re-deriving the formula.
 | Color Gain (direct) | post_sat <value> | [ ] | |
 | Color Hue (direct) | post_hue <value> | [ ] | |
 | Color Temp (direct) | wb_preset <value> | [ ] | |
+| Color Temp (Kelvin) | wb_temp <value> | [ ] | UI range hardcoded 2200-10000; firmware rejects out-of-range per live per-sensor min/max |
 | Green Gain: Reset | gain_green 256 | [ ] | |
 | Green Gain: Up | read-modify-write (+step) | [ ] | |
 | Green Gain: Down | read-modify-write (-step) | [ ] | |
@@ -185,7 +186,6 @@ value for a representative sample rather than re-deriving the formula.
 | AWB Speed | awb_speed <raw=<value>>  // real range is 0-2; do_awb_speed hard-rejects raw values above 2 with -EINVAL (unlike filter_detail, which clamps instead of erroring) | [ ] | |
 | S-Log3 Master Gain | slog3_master_gain <raw=<value>>  // real range is signed -6..12 dB (system_settings.h); do_slog3_master_gain hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ ] | |
 | Color Space | color_space <raw=<value>>  // real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP | [ ] | |
-| Tone-Mapping Mode | tm_mode <value> | [ ] | |
 | PQ Max Brightness | pq_max_brightness <raw=<value>>  // real range is 100-10000 cd/m2 (do_pq_max_brightness); raw is 0-4095, linearly scaled, not a placeholder | [ ] | |
 | MCC Op-Mode | mcc_opmode <value> | [ ] | |
 
@@ -254,6 +254,10 @@ value for a representative sample rather than re-deriving the formula.
 | Red Gain | gain_red | [ ] | |
 | Blue Gain | gain_blue | [ ] | |
 | Color Temp | no way to read back the current wb_preset index; SET works, see COMMANDS.color_temp_direct | [ ] | |
+| Color Temp (K) | wb_temp (current field) | [ ] | 4-nibble Kelvin; readback of the last-set whitepoint (0 if none) |
+| Color Temp Min (K) | wb_temp (min field, selector 0x01) | [ ] | live per-sensor calibrated min |
+| Color Temp Max (K) | wb_temp (max field, selector 0x02) | [ ] | live per-sensor calibrated max |
+| Color Temp Measured (K) | wb_temp_measure | [ ] | measured scene cct (lpf_cct_run); inquiry-only |
 | Color Gain | post_sat | [ ] | |
 | Color Hue | post_hue | [ ] | |
 | Gamma | log_mode | [ ] | |
@@ -280,7 +284,6 @@ value for a representative sample rather than re-deriving the formula.
 | Filter Detail | real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring | [ ] | |
 | Filter Denoise | filter_denoise | [ ] | |
 | Color Space | real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP | [ ] | |
-| Tone-Mapping Mode | tm_mode | [ ] | |
 | PQ Max Brightness | real range is 100-10000 cd/m2 (do_pq_max_brightness); raw is 0-4095, linearly scaled, not a placeholder | [ ] | |
 | LUT Mode | real settable range is 0-1 (Interpolate/Fast Gamma, lut_drv.h); do_lut_mode rejects LUT_MODE_FIXED=2 with -EINVAL ("used only internally") | [ ] | |
 | LUT Fixed Mode | lut_fixed_mode | [ ] | |

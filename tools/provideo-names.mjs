@@ -72,11 +72,19 @@ export const PROVIDEO_NAMES = {
 		},
 	},
 	wb_mode: { cmd: 'awb', scaled: false, note: 'readback only distinguishes Auto/Manual, not preset/trigger detail' },
-	// No ProVideo command accepts a settable Kelvin value; wb_preset's
-	// calibration-profile presets each have a real Kelvin rating, but there's
-	// no way to query which one is active. This is a raw preset-index
-	// passthrough (no Kelvin matching) with no inquiry counterpart.
+	// wb_preset's calibration-profile presets each have a real Kelvin rating,
+	// but there's no way to query which one is active. This is a raw
+	// preset-index passthrough (no Kelvin matching) with no inquiry
+	// counterpart of its own. wb_temp (below) is the distinct command that
+	// DOES set/read a real settable Kelvin value.
 	color_temp_direct: { cmd: 'wb_preset', scaled: false, note: 'raw preset index passthrough, not a Kelvin value -- see COMMANDS.color_temp_direct' },
+	// wb_temp: settable Kelvin whitepoint. The bare-dump form returns
+	// "<cur> <min> <max>"; the current/min/max inquiries select one field via
+	// a selector byte, so all three resolve to the same ProVideo command.
+	dct_wb_temp: { cmd: 'wb_temp', scaled: false, note: 'UI range hardcoded 2200-10000; firmware rejects out-of-range per live per-sensor min/max' },
+	dct_wb_temp_min: { cmd: 'wb_temp', scaled: false, note: 'min field of "wb_temp" dump (live per-sensor calibrated range); read via the bare wb_temp/dump with a selector, not its own ProVideo command' },
+	dct_wb_temp_max: { cmd: 'wb_temp', scaled: false, note: 'max field of "wb_temp" dump (live per-sensor calibrated range); read via the bare wb_temp/dump with a selector, not its own ProVideo command' },
+	dct_wb_temp_measure: { cmd: 'wb_temp_measure', scaled: false, note: 'measured scene color temperature [K] (lpf_cct_run); inquiry-only' },
 	cam_rgain: { cmd: 'gain_red', rud: { reset: 'gain_red 512', up: 'read-modify-write (+step)', down: 'read-modify-write (-step)' } },
 	cam_rgain_direct: { cmd: 'gain_red', scaled: false },
 	rgain: { cmd: 'gain_red', scaled: false },
@@ -194,7 +202,6 @@ export const PROVIDEO_NAMES = {
 	},
 	dct_filter_denoise: { cmd: 'filter_denoise', scaled: false },
 	dct_color_space: { cmd: 'color_space', scaled: true, note: 'real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP' },
-	dct_tm_mode: { cmd: 'tm_mode', scaled: false },
 	dct_pq_max_bright: {
 		cmd: 'pq_max_brightness',
 		scaled: true,

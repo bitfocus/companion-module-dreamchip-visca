@@ -286,6 +286,58 @@ test('the raw Shutter (direct) number control is left untouched alongside the ne
 	assert.equal(continuousParams().some((p) => p.id === 'cam_shutter_speed'), false)
 })
 
+// --- Color Temp (Kelvin) / wb_temp -----------------------------------------
+test('DCT wb_temp SET builds the exact 4-nibble wire frame and has the hardcoded 2200-10000 UI range', () => {
+	const c = COMMANDS.dct_wb_temp
+	assert.equal(c.kind, 'direct')
+	assert.deepEqual(c.prefix, [0x01, 0x7e, 0x01, 0x0b])
+	assert.equal(c.nibbles, 4)
+	assert.equal(c.min, 2200)
+	assert.equal(c.max, 10000)
+	assert.equal(c.group, 'White Balance')
+	// 5000 K = 0x1388 -> nibbles 1,3,8,8
+	assert.deepEqual(
+		[...buildFrame(1, [...c.prefix, ...encodeNibbles(5000, c.nibbles)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x0b, 0x01, 0x03, 0x08, 0x08, 0xff],
+	)
+	// round-trip: 2200 K = 0x0898
+	assert.equal(decodeNibbles(encodeNibbles(2200, c.nibbles)), 2200)
+})
+
+test('the three wb_temp field inquiries share SS 0x0B but use distinct selector bytes and varIds', () => {
+	const cur = INQUIRIES.dct_wb_temp
+	const min = INQUIRIES.dct_wb_temp_min
+	const max = INQUIRIES.dct_wb_temp_max
+	for (const q of [cur, min, max]) {
+		assert.deepEqual(q.payload.slice(0, 4), [0x09, 0x7e, 0x01, 0x0b], `${q.varId}: SS`)
+		assert.equal(q.decode.type, 'value')
+	}
+	assert.equal(cur.payload[4], 0x00)
+	assert.equal(min.payload[4], 0x01)
+	assert.equal(max.payload[4], 0x02)
+	assert.deepEqual([cur.varId, min.varId, max.varId], ['dct_wb_temp', 'dct_wb_temp_min', 'dct_wb_temp_max'])
+})
+
+test('wb_temp_measure inquiry is SS 0x0C with no selector byte, value decode', () => {
+	const q = INQUIRIES.dct_wb_temp_measure
+	assert.deepEqual(q.payload, [0x09, 0x7e, 0x01, 0x0c])
+	assert.equal(q.decode.type, 'value')
+})
+
+test('the wb_temp knob param reads back the current inquiry (varId dct_wb_temp) with the 2200-10000 range', () => {
+	const p = continuousParams().find((x) => x.id === 'dct_wb_temp')
+	assert.ok(p, 'dct_wb_temp is a continuous param')
+	assert.equal(p.varId, 'dct_wb_temp') // matches INQUIRIES.dct_wb_temp
+	assert.equal(p.min, 2200)
+	assert.equal(p.max, 10000)
+})
+
+test('color_temp_direct remains a distinct raw preset-index passthrough alongside the new settable dct_wb_temp', () => {
+	assert.ok(COMMANDS.dct_wb_temp, 'dct_wb_temp SET exists')
+	assert.equal(COMMANDS.color_temp_direct.name, 'Color Temp (direct)')
+	assert.equal(COMMANDS.color_temp_direct.max, 9)
+})
+
 test('RUD action bytes', () => {
 	assert.deepEqual(RUD, { reset: 0x00, up: 0x02, down: 0x03 })
 })
@@ -633,6 +685,12 @@ test("continuousParams' LUT Mode entry is narrowed to 0-1 (LUT_MODE_FIXED=2 is r
 	const p = continuousParams().find((x) => x.id === 'dct_lut_mode')
 	assert.equal(p.min, 0)
 	assert.equal(p.max, 1)
+})
+
+test('dct_tm_mode is not exposed (tm_mode\'s "off" path is a known-incomplete hack; see TODO.md)', () => {
+	assert.equal(COMMANDS.dct_tm_mode, undefined)
+	assert.equal(INQUIRIES.dct_tm_mode, undefined)
+	assert.equal(continuousParams().some((p) => p.id === 'dct_tm_mode'), false)
 })
 
 test('SDI Black (direct) is signed, -60..60 (do_sdi_black hard-rejects outside that)', () => {

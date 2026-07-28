@@ -5,12 +5,14 @@ It sends VISCA commands as raw bytes over TCP and reads camera state back via
 VISCA inquiries.
 
 Supported: the standard VISCA camera set — system/power, exposure (AE, gain,
-shutter), white balance (+ red/blue/colour gains), picture (gamma, brightness,
-contrast, flip/mirror), video mode, flicker, memory, settings save/reset — plus
-Dream Chip vendor extensions (green gain, gain mode, black levels, flare, AWB
-speed, S-Log3 gain, colour space, tone-mapping/PQ, noise reduction,
-detail/denoise, LUT mode/preset, SDI range/levels, MCC op-mode, OSD, audio,
-timecode hold). Pan/tilt/zoom/focus are out of scope.
+shutter), white balance (+ red/blue/colour gains, colour temperature in
+Kelvin), picture (gamma, brightness, contrast, flip/mirror), video mode,
+flicker, memory, settings save/reset — plus Dream Chip vendor extensions
+(green gain, gain mode, black levels, flare, AWB speed, S-Log3 gain, colour
+space, PQ, noise reduction, detail/denoise, LUT mode/preset, SDI
+range/levels, MCC op-mode, OSD, audio, timecode hold, white-balance colour
+temperature (settable Kelvin + measured scene cct)). Pan/tilt/zoom/focus are
+out of scope.
 
 ## Requirements
 

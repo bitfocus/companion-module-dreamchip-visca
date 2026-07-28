@@ -257,17 +257,31 @@ export const COMMANDS = {
 	// post_hue's real range is signed -128..127 (ISP_CCOR12_HUE_MIN/MAX); wire
 	// format widened from 1 nibble (unsigned 0-15, couldn't go negative at all).
 	cam_color_hue_direct: { name: 'Color Hue (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x4f, 0x00, 0x00), nibbles: 2, signed: true },
-	// No ProVideo command accepts a settable Kelvin value (stat_cct is
-	// read-only AWB telemetry). wb_preset's calibration-profile presets each
-	// have a real Kelvin rating, but there's no way to query which preset is
-	// currently active -- so this is a raw preset-index passthrough with no
-	// Kelvin matching (apply_color_profile's own -EINVAL bounds check handles
-	// an out-of-range index) and has no inquiry counterpart. `max` narrows the
+	// wb_preset's calibration-profile presets each have a real Kelvin rating,
+	// but there's no way to query which preset is currently active -- so this
+	// is a raw preset-index passthrough with no Kelvin matching
+	// (apply_color_profile's own -EINVAL bounds check handles an out-of-range
+	// index) and has no inquiry counterpart of its own. `max` narrows the
 	// Companion-side UI/knob range to 0-9 -- the largest calibration profile
 	// has 10 presets (indices 0-9); profile 0 only has 7 (0-6), so indices
 	// 7-9 still correctly error there (confirmed on real hardware), but 0-9
 	// is the real usable range across profiles, not the wire's full 0-4095.
+	// Distinct from dct_wb_temp below, which DOES set a real settable Kelvin
+	// value (via the wb_temp ProVideo command).
 	color_temp_direct: { name: 'Color Temp (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x20, 0x00, 0x00), nibbles: 2, min: 0, max: 9 },
+	// wb_temp sets the whitepoint by target Kelvin (do_wb_temp ->
+	// apply_color_temperature). The true min/max are queried live per-sensor
+	// (get_color_temperature_range), but the UI range is hardcoded to the
+	// real-world 2200-10000 K by project decision; apply_color_temperature's
+	// own -EINVAL bounds check remains the source of truth (a too-narrow or
+	// slightly-off UI range is not unsafe). 4 nibbles carry the 16-bit Kelvin,
+	// no scaling (Kelvin already is the real unit). The current whitepoint
+	// reads back via INQUIRIES.dct_wb_temp (the knob's varId, derived by
+	// continuousParams as dct_wb_temp); min/max/measure are separate
+	// read-only inquiries (see below) sharing this same SS 0x0B via a
+	// selector byte, since bare "wb_temp" returns all three at once and no
+	// VISCA command in this module packs multiple values into one inquiry.
+	dct_wb_temp: { name: 'Color Temp (Kelvin)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x0b), nibbles: 4, min: 2200, max: 10000 },
 
 	// Picture
 	cam_gamma: {
@@ -355,7 +369,10 @@ export const COMMANDS = {
 	// -EOPNOTSUPP); `max` narrows the Companion-side UI/knob range from the
 	// wire's full 1-nibble 0-15 capacity.
 	dct_color_space: { name: 'Color Space', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x17), nibbles: 1, min: 0, max: 2 },
-	dct_tm_mode: { name: 'Tone-Mapping Mode', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x21), nibbles: 1 },
+	// dct_tm_mode (tm_mode, SS 0x21) is intentionally NOT exposed: do_tm_mode's
+	// own "off" (0) path is marked "a hack to have something for the NAB"
+	// (product/src/cmd_tm.c) and does not reliably disable tone mapping on
+	// real hardware -- see TODO.md.
 	// pq_max_brightness's real range is 100-10000 cd/m2 (do_pq_max_brightness);
 	// widened to 3 nibbles (0-4095) for ~2.4 cd/m2 per step, matching the BSP.
 	dct_pq_max_bright: { name: 'PQ Max Brightness', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x22), nibbles: 3 },
@@ -444,6 +461,15 @@ export const INQUIRIES = {
 	rgain: { name: 'Red Gain', varId: 'rgain', payload: P(0x09, 0x04, 0x43), decode: { type: 'value' } },
 	bgain: { name: 'Blue Gain', varId: 'bgain', payload: P(0x09, 0x04, 0x44), decode: { type: 'value' } },
 	color_temp: { name: 'Color Temp', varId: 'color_temp', payload: P(0x09, 0x04, 0x20), decode: { type: 'value' } },
+	// The three fields of "wb_temp"'s bare dump ("<current> <min> <max>"),
+	// each its own VISCA round-trip disambiguated by a selector byte
+	// (payload's last byte: 0/1/2) -- see COMMANDS.dct_wb_temp.
+	dct_wb_temp: { name: 'Color Temp (K)', varId: 'dct_wb_temp', payload: P(0x09, 0x7e, 0x01, 0x0b, 0x00), decode: { type: 'value' } },
+	dct_wb_temp_min: { name: 'Color Temp Min (K)', varId: 'dct_wb_temp_min', payload: P(0x09, 0x7e, 0x01, 0x0b, 0x01), decode: { type: 'value' } },
+	dct_wb_temp_max: { name: 'Color Temp Max (K)', varId: 'dct_wb_temp_max', payload: P(0x09, 0x7e, 0x01, 0x0b, 0x02), decode: { type: 'value' } },
+	// wb_temp_measure: the measured scene color temperature, inquiry-only
+	// (no ProVideo set handler exists for it at all).
+	dct_wb_temp_measure: { name: 'Color Temp Measured (K)', varId: 'dct_wb_temp_measure', payload: P(0x09, 0x7e, 0x01, 0x0c), decode: { type: 'value' } },
 	color_gain: { name: 'Color Gain', varId: 'color_gain', payload: P(0x09, 0x04, 0x49), decode: { type: 'value' } },
 	// nibbles:2 -- the real reply pads to "00 00 0p 0q" (reply_pq,
 	// visca_map_picture.c), so the two's-complement bit-width must be
@@ -476,7 +502,6 @@ export const INQUIRIES = {
 	dct_filter_detail: { name: 'Filter Detail', varId: 'dct_filter_detail', payload: P(0x09, 0x7e, 0x01, 0x15), decode: { type: 'value' } },
 	dct_filter_denoise: { name: 'Filter Denoise', varId: 'dct_filter_denoise', payload: P(0x09, 0x7e, 0x01, 0x16), decode: { type: 'value' } },
 	dct_color_space: { name: 'Color Space', varId: 'dct_color_space', payload: P(0x09, 0x7e, 0x01, 0x17), decode: { type: 'value' } },
-	dct_tm_mode: { name: 'Tone-Mapping Mode', varId: 'dct_tm_mode', payload: P(0x09, 0x7e, 0x01, 0x21), decode: { type: 'value' } },
 	dct_pq_max_bright: { name: 'PQ Max Brightness', varId: 'dct_pq_max_bright', payload: P(0x09, 0x7e, 0x01, 0x22), decode: { type: 'value' } },
 	dct_lut_mode: { name: 'LUT Mode', varId: 'dct_lut_mode', payload: P(0x09, 0x7e, 0x01, 0x24), decode: { type: 'value' } },
 	dct_lut_fixed_mode: { name: 'LUT Fixed Mode', varId: 'dct_lut_fixed_mode', payload: P(0x09, 0x7e, 0x01, 0x25), decode: { type: 'value' } },

@@ -39,6 +39,26 @@ added on the firmware side (and, where noted, a matching camera command).
 - [ ] **AE Shutter-Priority** currently behaves like Full Auto — implement a real
       shutter-priority path.
 
+### DCT extensions — removed (firmware limitation, not a VISCA-mapping issue)
+- [ ] **tm_mode** (`dct_tm_mode`, `0x21`) — removed from `commands.js`/`INQUIRIES`.
+      `tm_mode 0` (disable) accepts without a VISCA error but doesn't actually
+      stick: `do_tm_mode` (`product/src/cmd_tm.c`, marked `// TODO: this is a
+      hack to have something for the NAB`) pokes the SLTM/GTM registers
+      directly instead of going through the driver API, and
+      `g_chain_settings.tm_mode` is write-only — nothing ever reads it back to
+      decide whether the tone-mapping hardware should be on. Separately,
+      `chain_set_vmode()` (`product/src/chain.c`) unconditionally calls
+      `isp_enable_gtm(g_chain.isp, true)` ("for now enable the gtm with a
+      linear curve") on every video-mode change, chain stop/start, AND at boot
+      via `execute_settings()` — silently re-enabling tone mapping regardless
+      of what `tm_mode` was last set to, so even a saved "off" doesn't survive
+      a power cycle. Real fix needs both: `chain_set_vmode()`/
+      `execute_settings()` must consult `g_chain_settings.tm_mode` instead of
+      hardcoding `true`, and `tm_mode`/`tm_param` should route through
+      `isp_enable_gtm()`/the proper tone-curve driver API instead of raw
+      `hw_access_write_reg` pokes. Re-add the Companion control once that's
+      done.
+
 ### DCT extensions — deferred (VISCA payload doesn't match the camera command's args)
 - [ ] **knee** (enable + point + slope)
 - [ ] **lut_enable** (index + flag)

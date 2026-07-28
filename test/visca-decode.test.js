@@ -77,6 +77,36 @@ test('a Shutter (Speed) send is indistinguishable on the wire from Shutter (dire
 	assert.match(entries[0].provideo, /real range is 100-38339us/)
 })
 
+test('DCT-ext wb_temp SET translates to wb_temp <kelvin>, 4-nibble, no scaling', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x0b, ...encodeNibbles(5000, 4)])))
+	assert.equal(entries.length, 1)
+	assert.match(entries[0].companion, /Color Temp \(Kelvin\) = 5000/)
+	assert.equal(entries[0].provideo, 'wb_temp 5000')
+})
+
+test('DCT-ext wb_temp current inquiry + reply decodes Kelvin and names wb_temp', () => {
+	const lines = parseLines(`${tx([0x09, 0x7e, 0x01, 0x0b, 0x00])}\n${rx([0x50, ...encodeNibbles(2200, 4)])}`)
+	const entries = decodeDump(lines)
+	assert.match(entries[0].companion, /Color Temp \(K\) \(inquiry\)/)
+	assert.match(entries[1].companion, /Color Temp \(K\) = 2200/)
+	assert.equal(entries[1].provideo, 'wb_temp')
+})
+
+test('DCT-ext wb_temp min/max inquiries are distinguished by selector byte', () => {
+	const minEntries = decodeDump(parseLines(tx([0x09, 0x7e, 0x01, 0x0b, 0x01])))
+	const maxEntries = decodeDump(parseLines(tx([0x09, 0x7e, 0x01, 0x0b, 0x02])))
+	assert.match(minEntries[0].companion, /Color Temp Min \(K\) \(inquiry\)/)
+	assert.match(maxEntries[0].companion, /Color Temp Max \(K\) \(inquiry\)/)
+})
+
+test('DCT-ext wb_temp_measure inquiry + reply decodes measured cct and names wb_temp_measure', () => {
+	const lines = parseLines(`${tx([0x09, 0x7e, 0x01, 0x0c])}\n${rx([0x50, ...encodeNibbles(5600, 4)])}`)
+	const entries = decodeDump(lines)
+	assert.match(entries[0].companion, /Color Temp Measured \(K\) \(inquiry\)/)
+	assert.match(entries[1].companion, /Color Temp Measured \(K\) = 5600/)
+	assert.equal(entries[1].provideo, 'wb_temp_measure')
+})
+
 test('signed direct-set (Color Hue) decodes the wire byte as negative, not as its raw unsigned value', () => {
 	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x4f, 0x00, 0x00, ...encodeNibbles(-5 & 0xff, 2)])))
 	assert.match(entries[0].companion, /Color Hue \(direct\) = -5/)
