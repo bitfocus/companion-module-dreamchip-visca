@@ -5,7 +5,7 @@ command/effect each Companion action or inquiry maps to). Check off each row
 after verifying it against real hardware; use Comments for anything
 unexpected (error code, wrong value, etc.).
 
-Total: 107 command test cases, 52 inquiries.
+Total: 125 command test cases, 52 inquiries.
 
 An automated equivalent of this plan lives at `tools/camera-check.mjs` -- it
 sends the same commands over a real serial connection and validates the
@@ -62,6 +62,24 @@ camera attached.
 | Gain: up | read-modify-write (+109) | [ ] | |
 | Gain: down | read-modify-write (-109) | [ ] | |
 | Gain (direct) | cam_gain <raw=<value>>  // real range is 1000-45715 (1x/0dB/140 ISO min; max from the current AUTO gain-mode range); raw is 0-4095, linearly scaled, not a placeholder | [ ] | |
+| Gain (ISO): ISO 140 | cam_gain <raw=0> (ISO 140, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 160 | cam_gain <raw=13> (ISO 160, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 200 | cam_gain <raw=39> (ISO 200, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 250 | cam_gain <raw=71> (ISO 250, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 320 | cam_gain <raw=117> (ISO 320, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 400 | cam_gain <raw=170> (ISO 400, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 500 | cam_gain <raw=235> (ISO 500, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 640 | cam_gain <raw=327> (ISO 640, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 800 | cam_gain <raw=431> (ISO 800, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 1000 | cam_gain <raw=562> (ISO 1000, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 1250 | cam_gain <raw=726> (ISO 1250, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 1600 | cam_gain <raw=954> (ISO 1600, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 2000 | cam_gain <raw=1216> (ISO 2000, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 2500 | cam_gain <raw=1543> (ISO 2500, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 3200 | cam_gain <raw=2001> (ISO 3200, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 4000 | cam_gain <raw=2524> (ISO 4000, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 5000 | cam_gain <raw=3179> (ISO 5000, OG03A10 sensor) | [ ] | |
+| Gain (ISO): ISO 6400 | cam_gain <raw=4094> (ISO 6400, OG03A10 sensor) | [ ] | |
 | Shutter: reset | cam_exposure 1000 | [ ] | |
 | Shutter: up | read-modify-write (+93us) | [ ] | |
 | Shutter: down | read-modify-write (-93us) | [ ] | |

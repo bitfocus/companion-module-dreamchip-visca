@@ -8,6 +8,7 @@
 //   direct - <prefix> + value split into <nibbles> low-nibble bytes
 //   fixed  - no-argument payload
 //   video  - cam_system video mode via the SYSTEM table
+//   iso    - cam_gain via the curated GAIN_ISO named-step table (OG03A10)
 // INQUIRIES entries carry a payload + a decode descriptor (enum|value|version|system).
 
 export const TERMINATOR = 0xff
@@ -52,6 +53,42 @@ export const SYSTEM_NAMES = {
 }
 const SYSTEM_INQ = {}
 for (const [vm, [b2, b3]] of Object.entries(SYSTEM)) SYSTEM_INQ[`${b2},${b3}`] = Number(vm)
+
+// --- Gain (ISO) named-step table (OmniVision OG03A10 sensor ONLY) ----------
+// cam_gain's wire value is a raw 3-nibble 0-4095 that the firmware linearly
+// scales onto a "real gain unit" range 1000-45715 via truncating integer
+// division (real = 1000 + raw*44715/4095; dct-phoenix-zephyr-bsp
+// visca/src/visca_map_exposure.c map_gain()/unmap_gain()). The OG03A10 sensor
+// (driver/src/omnivision.c) defines ISO in real-gain units as
+// real_gain_unit(ISO) = floor(ISO*1000/MIN_ISO), MIN_ISO = 140 (the 1x/0dB
+// floor; system_settings.c and og03a10_dpf_tables.h independently confirm the
+// 140-ISO-per-1000-gain-unit proportionality). Inverting map_gain() with the
+// SAME truncating integer division gives the raw wire value for an ISO:
+//   raw(ISO) = trunc((floor(ISO*1000/140) - 1000) * 4095 / 44715), clamped 0-4095
+// NOTE (trunc, not round): the firmware's inverse is C integer division
+// (truncation); Math.round would give different raw values for ~half the
+// steps (e.g. ISO 6400 -> 4095 instead of the correct 4094).
+//
+// CAVEAT: the 140 / 1000-45715 constants are SPECIFIC TO THE OG03A10 (the
+// Phoenix board's sensor). Other sensor variants (IMX274, IMX421) use
+// different constants, and VISCA cannot detect which sensor is fitted. This
+// is deliberately hardcoded for the OG03A10 per project decision -- do NOT
+// try to make it sensor-agnostic.
+export const GAIN_ISO_MIN = 140 // OG03A10 MIN_ISO
+const GAIN_REAL_MIN = 1000
+const GAIN_REAL_MAX = 45715
+const GAIN_RAW_MAX = 4095
+export function isoToGainRaw(iso) {
+	const realUnit = Math.floor((iso * 1000) / GAIN_ISO_MIN)
+	const raw = Math.trunc(((realUnit - GAIN_REAL_MIN) * GAIN_RAW_MAX) / (GAIN_REAL_MAX - GAIN_REAL_MIN))
+	return Math.max(0, Math.min(GAIN_RAW_MAX, raw))
+}
+// Curated third-stop ISO steps offered in the "Gain (ISO)" dropdown/presets.
+// The step LIST is arbitrary/curated (not derivable) so it's a literal; the
+// raw column is computed from isoToGainRaw() at load time so it can never
+// drift from the formula.
+export const GAIN_ISO_STEPS = [140, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400]
+export const GAIN_ISO = GAIN_ISO_STEPS.map((iso) => ({ iso, raw: isoToGainRaw(iso) }))
 
 // --- codec (ported from visca_frame.py) ------------------------------------
 export function encodeNibbles(value, n) {
@@ -137,6 +174,11 @@ export const COMMANDS = {
 	// current AUTO gain-mode range, isi_access_get_gain_range); widened to 3
 	// nibbles (0-4095) for ~10.9 gain units per step, matching the BSP.
 	cam_gain_direct: { name: 'Gain (direct)', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00), nibbles: 3 },
+	// Gain (ISO): a curated dropdown of named third-stop ISO values (OG03A10
+	// sensor) that map to the SAME wire command as cam_gain_direct (01 04 4C
+	// ...) via the GAIN_ISO table above. Purely additive -- the raw
+	// cam_gain_direct number control is left untouched for manual/precise entry.
+	cam_gain_iso: { name: 'Gain (ISO)', group: 'Exposure', kind: 'iso', prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00), nibbles: 3 },
 	// Reset/Up/Down is the standard VISCA CAM_Shutter structure. Up/Down are a
 	// firmware-side read-modify-write of cam_exposure's real value (query
 	// current value, step by ~93us -- the same "10 raw nibble-steps' worth"

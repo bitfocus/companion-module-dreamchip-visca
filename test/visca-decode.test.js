@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildFrame, encodeNibbles } from '../commands.js'
+import { buildFrame, encodeNibbles, GAIN_ISO } from '../commands.js'
 import { decodeDump, parseLines, translate } from '../tools/visca-decode.mjs'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
@@ -50,6 +50,18 @@ test('standard-category direct-set (Gain) reports the raw value with a scaling c
 	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x4c, 0x00, 0x00, ...encodeNibbles(42, 3)])))
 	assert.match(entries[0].companion, /Gain \(direct\) = 42/)
 	assert.match(entries[0].provideo, /^cam_gain <raw=42>/)
+	assert.match(entries[0].provideo, /real range is 1000-45715/)
+})
+
+test('a Gain (ISO) send is indistinguishable on the wire from Gain (direct) and decodes via cam_gain_direct', () => {
+	// ISO 3200 -> raw 2001 (GAIN_ISO). The wire bytes equal a manual
+	// Gain (direct) = 2001, so the decoder resolves it through cam_gain_direct
+	// (no distinct provideo mapping needed or possible).
+	const raw = GAIN_ISO.find((g) => g.iso === 3200).raw
+	assert.equal(raw, 2001)
+	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x4c, 0x00, 0x00, ...encodeNibbles(raw, 3)])))
+	assert.match(entries[0].companion, /Gain \(direct\) = 2001/)
+	assert.match(entries[0].provideo, /^cam_gain <raw=2001>/)
 	assert.match(entries[0].provideo, /real range is 1000-45715/)
 })
 

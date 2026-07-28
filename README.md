@@ -36,6 +36,7 @@ In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
   - enum commands → a dropdown (e.g. AE Mode, White Balance, Gamma, Flip),
   - reset/up/down commands → a dropdown (Gain, Shutter, Red/Blue Gain, Bright),
   - "direct" commands → a numeric value input,
+  - Gain (ISO) → a dropdown of named ISO steps (140–6400, OG03A10 sensor); the raw Gain (direct) input stays for manual entry,
   - fixed commands → IF Clear, Settings Save/Reset,
   - Video → a dropdown of named modes (1080p30, 1080p25, …, 1080i50), plus "Poll inquiries now",
   - **"Knob: Adjust value (relative)"** → pick a parameter + a signed step (used by

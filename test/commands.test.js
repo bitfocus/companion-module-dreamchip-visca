@@ -14,6 +14,9 @@ import {
 	ENUM,
 	SYSTEM,
 	SYSTEM_NAMES,
+	GAIN_ISO,
+	GAIN_ISO_STEPS,
+	isoToGainRaw,
 	RUD,
 	TERMINATOR,
 	encodeNibbles,
@@ -25,7 +28,7 @@ import {
 } from '../commands.js'
 
 const isByte = (b) => Number.isInteger(b) && b >= 0 && b <= 0xff
-const KINDS = new Set(['enum', 'rud', 'direct', 'fixed', 'video'])
+const KINDS = new Set(['enum', 'rud', 'direct', 'fixed', 'video', 'iso'])
 const DECODES = new Set(['enum', 'value', 'version', 'system'])
 
 // return every raw payload a command can emit (for structural checks)
@@ -101,6 +104,10 @@ test('every COMMANDS entry is well-formed', () => {
 		} else if (c.kind === 'fixed') {
 			assert.ok(Array.isArray(c.bytes) && c.bytes.every(isByte), `${id}: bytes`)
 			assert.equal(c.bytes[0], 0x01, `${id}: not a command (0x01)`)
+		} else if (c.kind === 'iso') {
+			assert.ok(Array.isArray(c.prefix) && c.prefix.every(isByte), `${id}: prefix`)
+			assert.equal(c.prefix[0], 0x01, `${id}: not a command (0x01)`)
+			assert.ok([1, 2, 3, 4].includes(c.nibbles), `${id}: nibbles must be 1-4`)
 		}
 	}
 })
@@ -175,6 +182,55 @@ test('SYSTEM_NAMES covers exactly the SYSTEM modes with non-empty string labels'
 	}
 	assert.equal(SYSTEM_NAMES[4], '1080p30')
 	assert.equal(SYSTEM_NAMES[11], '1080i60')
+})
+
+// --- Gain (ISO) named-step table (OG03A10) ---------------------------------
+test('GAIN_ISO raw values match the OG03A10 ISO->raw formula for all 18 steps', () => {
+	assert.deepEqual(GAIN_ISO_STEPS, [140, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400])
+	assert.equal(GAIN_ISO.length, 18)
+	for (const { iso, raw } of GAIN_ISO) {
+		// Recompute independently: real_gain_unit = floor(ISO*1000/MIN_ISO), then
+		// invert the firmware's linear raw->real scale with the SAME truncating
+		// integer division map_gain() uses (trunc, NOT round).
+		const realUnit = Math.floor((iso * 1000) / 140)
+		const expected = Math.max(0, Math.min(4095, Math.trunc(((realUnit - 1000) * 4095) / 44715)))
+		assert.equal(raw, expected, `ISO ${iso}`)
+		assert.equal(raw, isoToGainRaw(iso), `ISO ${iso} via isoToGainRaw`)
+		assert.ok(raw >= 0 && raw <= 4095, `ISO ${iso} raw in range`)
+	}
+	assert.equal(GAIN_ISO[0].raw, 0) // ISO 140 -> 0
+	assert.equal(GAIN_ISO.at(-1).raw, 4094) // ISO 6400 -> 4094 (trunc; round would give 4095)
+})
+
+test('Gain (ISO) builds the exact cam_gain wire frame for spot-check ISO values', () => {
+	const c = COMMANDS.cam_gain_iso
+	assert.equal(c.kind, 'iso')
+	assert.deepEqual(c.prefix, [0x01, 0x04, 0x4c, 0x00, 0x00])
+	assert.equal(c.nibbles, 3)
+	const raw = (iso) => GAIN_ISO.find((g) => g.iso === iso).raw
+	// ISO 140 -> raw 0
+	assert.deepEqual(
+		[...buildFrame(1, [...c.prefix, ...encodeNibbles(raw(140), c.nibbles)])],
+		[0x81, 0x01, 0x04, 0x4c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff],
+	)
+	// ISO 800 -> raw 431 (0x1AF -> nibbles 1,A,F)
+	assert.deepEqual(
+		[...buildFrame(1, [...c.prefix, ...encodeNibbles(raw(800), c.nibbles)])],
+		[0x81, 0x01, 0x04, 0x4c, 0x00, 0x00, 0x01, 0x0a, 0x0f, 0xff],
+	)
+	// ISO 6400 -> raw 4094 (0xFFE -> nibbles F,F,E)
+	assert.deepEqual(
+		[...buildFrame(1, [...c.prefix, ...encodeNibbles(raw(6400), c.nibbles)])],
+		[0x81, 0x01, 0x04, 0x4c, 0x00, 0x00, 0x0f, 0x0f, 0x0e, 0xff],
+	)
+})
+
+test('the raw Gain (direct) number control is left untouched alongside the new ISO control', () => {
+	assert.equal(COMMANDS.cam_gain_direct.kind, 'direct')
+	assert.deepEqual(COMMANDS.cam_gain_direct.prefix, [0x01, 0x04, 0x4c, 0x00, 0x00])
+	assert.equal(COMMANDS.cam_gain_direct.nibbles, 3)
+	// the ISO control is additive and is NOT turned into a knob param
+	assert.equal(continuousParams().some((p) => p.id === 'cam_gain_iso'), false)
 })
 
 test('RUD action bytes', () => {

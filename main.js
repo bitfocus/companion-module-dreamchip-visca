@@ -1,5 +1,5 @@
 import { InstanceBase, InstanceStatus, Regex, TCPHelper, runEntrypoint, combineRgb } from '@companion-module/base'
-import { COMMANDS, INQUIRIES, ENUM, SYSTEM, SYSTEM_NAMES, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams } from './commands.js'
+import { COMMANDS, INQUIRIES, ENUM, SYSTEM, SYSTEM_NAMES, GAIN_ISO, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams } from './commands.js'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
 const GREEN = combineRgb(0, 102, 0)
@@ -233,6 +233,12 @@ class DctViscaInstance extends InstanceBase {
 					const [b2, b3] = SYSTEM[ev.options.mode]
 					this.send([0x01, 0x04, 0x24, 0x00, 0x00, b2, b3])
 				}
+			} else if (c.kind === 'iso') {
+				a.options = [{ type: 'dropdown', id: 'iso', label: 'ISO', default: GAIN_ISO[0].iso, choices: GAIN_ISO.map((g) => ({ id: g.iso, label: `ISO ${g.iso}` })) }]
+				a.callback = (ev) => {
+					const raw = GAIN_ISO.find((g) => g.iso === Number(ev.options.iso))?.raw ?? 0
+					this.send([...c.prefix, ...encodeNibbles(raw, c.nibbles)])
+				}
 			}
 			actions[id] = a
 		}
@@ -275,6 +281,10 @@ class DctViscaInstance extends InstanceBase {
 				for (const mode of Object.keys(SYSTEM)) {
 					const label = SYSTEM_NAMES[mode] ?? `Mode ${mode}`
 					presets[`${id}_${mode}`] = btn(c.group, `${c.name}: ${label}`, `${c.name}\\n${label}`, id, { mode })
+				}
+			} else if (c.kind === 'iso') {
+				for (const g of GAIN_ISO) {
+					presets[`${id}_${g.iso}`] = btn(c.group, `${c.name}: ISO ${g.iso}`, `${c.name}\\nISO ${g.iso}`, id, { iso: g.iso })
 				}
 			}
 		}
