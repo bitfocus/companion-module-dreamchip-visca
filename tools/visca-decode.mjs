@@ -8,7 +8,7 @@
 // Bare hex lines (no "TX "/"RX " prefix) are also accepted; direction is then
 // inferred from the frame's type/kind byte.
 import { readFileSync } from 'node:fs'
-import { COMMANDS, INQUIRIES, RUD, SYSTEM, TERMINATOR, decodeNibbles, decodeReply, toSigned } from '../commands.js'
+import { COMMANDS, INQUIRIES, RUD, SYSTEM, SYSTEM_NAMES, TERMINATOR, decodeNibbles, decodeReply, toSigned } from '../commands.js'
 import { PROVIDEO_NAMES } from './provideo-names.mjs'
 
 const ERROR_CODES = {
@@ -83,7 +83,7 @@ function describeCompanion(m) {
 	if (m.kind === 'enum') return `${c.name} = ${m.choice}`
 	if (m.kind === 'rud') return `${c.name} ${m.action}`
 	if (m.kind === 'direct') return `${c.name} = ${m.value}`
-	if (m.kind === 'video') return `${c.name} = Mode ${m.mode}`
+	if (m.kind === 'video') return `${c.name} = ${SYSTEM_NAMES[m.mode] ?? `Mode ${m.mode}`}`
 	return c.name
 }
 

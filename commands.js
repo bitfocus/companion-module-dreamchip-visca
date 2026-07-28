@@ -38,6 +38,18 @@ export const SYSTEM = {
 	11: [0x00, 0x00],
 	12: [0x00, 0x01],
 }
+// video_mode index -> human label (real ProVideo video_mode_t names,
+// interfaces/include/video_modes.h). Keyed identically to SYSTEM.
+export const SYSTEM_NAMES = {
+	4: '1080p30',
+	5: '1080p25',
+	6: '1080p24',
+	7: '1080p23.98',
+	9: '1080p50',
+	10: '1080p60',
+	11: '1080i60',
+	12: '1080i50',
+}
 const SYSTEM_INQ = {}
 for (const [vm, [b2, b3]] of Object.entries(SYSTEM)) SYSTEM_INQ[`${b2},${b3}`] = Number(vm)
 
@@ -84,7 +96,7 @@ export function decodeReply(decode, payload) {
 		case 'system': {
 			if (payload.length >= 4) {
 				const vm = SYSTEM_INQ[`${payload[2]},${payload[3]}`]
-				if (vm !== undefined) return String(vm)
+				if (vm !== undefined) return SYSTEM_NAMES[vm] ?? String(vm)
 			}
 			return Buffer.from(payload).toString('hex')
 		}
@@ -109,7 +121,7 @@ export const COMMANDS = {
 	cam_settings_reset: { name: 'Settings Reset', group: 'System', kind: 'fixed', bytes: P(0x01, 0x04, 0xa0, 0x10) },
 
 	// Video mode (see SYSTEM dialect caveat)
-	cam_system: { name: 'Video Mode', group: 'Video', kind: 'video' },
+	cam_system: { name: 'Video', group: 'Video', kind: 'video' },
 
 	// Exposure / AEC
 	cam_ae: {

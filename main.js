@@ -1,5 +1,5 @@
 import { InstanceBase, InstanceStatus, Regex, TCPHelper, runEntrypoint, combineRgb } from '@companion-module/base'
-import { COMMANDS, INQUIRIES, ENUM, SYSTEM, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams } from './commands.js'
+import { COMMANDS, INQUIRIES, ENUM, SYSTEM, SYSTEM_NAMES, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams } from './commands.js'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
 const GREEN = combineRgb(0, 102, 0)
@@ -228,7 +228,7 @@ class DctViscaInstance extends InstanceBase {
 				a.callback = () => this.send(c.bytes)
 			} else if (c.kind === 'video') {
 				const modes = Object.keys(SYSTEM)
-				a.options = [{ type: 'dropdown', id: 'mode', label: 'Video mode', default: modes[0], choices: modes.map((m) => ({ id: m, label: `Mode ${m}` })) }]
+				a.options = [{ type: 'dropdown', id: 'mode', label: 'Video mode', default: modes[0], choices: modes.map((m) => ({ id: m, label: SYSTEM_NAMES[m] ?? `Mode ${m}` })) }]
 				a.callback = (ev) => {
 					const [b2, b3] = SYSTEM[ev.options.mode]
 					this.send([0x01, 0x04, 0x24, 0x00, 0x00, b2, b3])
@@ -271,6 +271,11 @@ class DctViscaInstance extends InstanceBase {
 				}
 			} else if (c.kind === 'fixed') {
 				presets[id] = btn(c.group, c.name, c.name.replace(/ /g, '\\n'), id, {})
+			} else if (c.kind === 'video') {
+				for (const mode of Object.keys(SYSTEM)) {
+					const label = SYSTEM_NAMES[mode] ?? `Mode ${mode}`
+					presets[`${id}_${mode}`] = btn(c.group, `${c.name}: ${label}`, `${c.name}\\n${label}`, id, { mode })
+				}
 			}
 		}
 		// Rotary-encoder (Stream Deck+) knobs: turn = adjust +/- step, press = sync.

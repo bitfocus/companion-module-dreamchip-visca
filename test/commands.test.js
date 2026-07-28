@@ -13,6 +13,7 @@ import {
 	INQUIRIES,
 	ENUM,
 	SYSTEM,
+	SYSTEM_NAMES,
 	RUD,
 	TERMINATOR,
 	encodeNibbles,
@@ -73,7 +74,7 @@ test('decodeReply handles each decode type', () => {
 		/vendor=0x0023/,
 	)
 	const [b2, b3] = SYSTEM[4]
-	assert.equal(decodeReply({ type: 'system' }, [0x00, 0x00, b2, b3]), '4')
+	assert.equal(decodeReply({ type: 'system' }, [0x00, 0x00, b2, b3]), '1080p30')
 })
 
 // --- COMMANDS integrity ----------------------------------------------------
@@ -163,8 +164,17 @@ test('SYSTEM video-mode table is well-formed and reversible via decodeReply', ()
 		const key = pair.join(',')
 		assert.ok(!seen.has(key), `mode ${vm}: duplicate b2,b3`)
 		seen.add(key)
-		assert.equal(decodeReply({ type: 'system' }, [0x00, 0x00, pair[0], pair[1]]), String(vm))
+		assert.equal(decodeReply({ type: 'system' }, [0x00, 0x00, pair[0], pair[1]]), SYSTEM_NAMES[vm])
 	}
+})
+
+test('SYSTEM_NAMES covers exactly the SYSTEM modes with non-empty string labels', () => {
+	assert.deepEqual(Object.keys(SYSTEM_NAMES).sort(), Object.keys(SYSTEM).sort())
+	for (const [vm, name] of Object.entries(SYSTEM_NAMES)) {
+		assert.ok(name && typeof name === 'string', `mode ${vm}: label`)
+	}
+	assert.equal(SYSTEM_NAMES[4], '1080p30')
+	assert.equal(SYSTEM_NAMES[11], '1080i60')
 })
 
 test('RUD action bytes', () => {

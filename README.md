@@ -37,7 +37,7 @@ In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
   - reset/up/down commands → a dropdown (Gain, Shutter, Red/Blue Gain, Bright),
   - "direct" commands → a numeric value input,
   - fixed commands → IF Clear, Settings Save/Reset,
-  - Video Mode → a mode dropdown, plus "Poll inquiries now",
+  - Video → a dropdown of named modes (1080p30, 1080p25, …, 1080i50), plus "Poll inquiries now",
   - **"Knob: Adjust value (relative)"** → pick a parameter + a signed step (used by
     the knob presets, but also assignable to any button).
 - **Presets** — a button per command choice, grouped by category (System, Power,

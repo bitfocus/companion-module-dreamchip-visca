@@ -5,7 +5,7 @@ command/effect each Companion action or inquiry maps to). Check off each row
 after verifying it against real hardware; use Comments for anything
 unexpected (error code, wrong value, etc.).
 
-Total: 100 command test cases, 52 inquiries.
+Total: 107 command test cases, 52 inquiries.
 
 An automated equivalent of this plan lives at `tools/camera-check.mjs` -- it
 sends the same commands over a real serial connection and validates the
@@ -42,7 +42,14 @@ camera attached.
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| Video Mode | (select video mode, see SYSTEM table in commands.js) | [ ] | |
+| Video: 1080p30 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
+| Video: 1080p25 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
+| Video: 1080p24 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
+| Video: 1080p23.98 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
+| Video: 1080p50 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
+| Video: 1080p60 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
+| Video: 1080i60 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
+| Video: 1080i50 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
 
 ### Exposure
 

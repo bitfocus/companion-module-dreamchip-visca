@@ -276,6 +276,18 @@ test('SDI Black/White (direct) decode negative signed values, not the wire-range
 	assert.match(white[0].provideo, /real range is signed -80\.\.79/)
 })
 
+test('video-mode set (cam_system) decodes to its named mode, not a bare index', () => {
+	const [b2, b3] = [0x00, 0x0e] // mode 4 = 1080p30
+	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x24, 0x00, 0x00, b2, b3])))
+	assert.match(entries[0].companion, /Video = 1080p30/)
+})
+
+test('video-mode inquiry reply decodes to its named mode', () => {
+	const lines = parseLines(`${tx([0x09, 0x04, 0x24])}\n${rx([0x50, 0x00, 0x00, 0x00, 0x0e])}`)
+	const entries = decodeDump(lines)
+	assert.match(entries[1].companion, /Video Mode = 1080p30/)
+})
+
 test('translate() returns a clear message for a frame with no table entry at all', () => {
 	assert.equal(translate(null), '(no ProVideo mapping known)')
 })
