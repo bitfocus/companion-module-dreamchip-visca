@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildFrame, encodeNibbles, GAIN_ISO } from '../commands.js'
+import { buildFrame, encodeNibbles, GAIN_ISO, SHUTTER_SPEEDS } from '../commands.js'
 import { decodeDump, parseLines, translate } from '../tools/visca-decode.mjs'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
@@ -63,6 +63,18 @@ test('a Gain (ISO) send is indistinguishable on the wire from Gain (direct) and 
 	assert.match(entries[0].companion, /Gain \(direct\) = 2001/)
 	assert.match(entries[0].provideo, /^cam_gain <raw=2001>/)
 	assert.match(entries[0].provideo, /real range is 1000-45715/)
+})
+
+test('a Shutter (Speed) send is indistinguishable on the wire from Shutter (direct) and decodes via cam_shutter_direct', () => {
+	// 1/1000 -> raw 96 (SHUTTER_SPEEDS). The wire bytes equal a manual
+	// Shutter (direct) = 96, so the decoder resolves it through
+	// cam_shutter_direct (no distinct provideo mapping needed or possible).
+	const raw = SHUTTER_SPEEDS.find((s) => s.n === 1000).raw
+	assert.equal(raw, 96)
+	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x4a, 0x00, 0x00, ...encodeNibbles(raw, 3)])))
+	assert.match(entries[0].companion, /Shutter \(direct\) = 96/)
+	assert.match(entries[0].provideo, /^cam_exposure <raw=96>/)
+	assert.match(entries[0].provideo, /real range is 100-38339us/)
 })
 
 test('signed direct-set (Color Hue) decodes the wire byte as negative, not as its raw unsigned value', () => {
@@ -261,12 +273,18 @@ test('color_temp_direct is a raw wb_preset index passthrough, not a Kelvin value
 	assert.equal(entries[0].provideo, 'wb_preset 3')
 })
 
-test('cam_settings_reset now maps to reset_settings (confirmed reachable on real hardware); cam_settings_save is still unimplemented', () => {
+test('cam_settings_reset and cam_settings_save both map to real ProVideo commands (confirmed reachable on real hardware)', () => {
 	const reset = decodeDump(parseLines(tx([0x01, 0x04, 0xa0, 0x10])))
 	assert.equal(reset[0].provideo, 'reset_settings')
 
 	const save = decodeDump(parseLines(tx([0x01, 0x04, 0xa5, 0x10])))
-	assert.match(save[0].provideo, /not implemented in current firmware \(func 0xA5 unhandled\)/)
+	assert.equal(save[0].provideo, 'save_settings')
+})
+
+test('Load Settings (DCT ext, no standard VISCA equivalent) maps to load_settings', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x67])))
+	assert.match(entries[0].companion, /Load Settings/)
+	assert.equal(entries[0].provideo, 'load_settings')
 })
 
 test('S-Log3 Master Gain (direct) decodes a negative signed value, not the wire-range full 0-255', () => {

@@ -5,7 +5,7 @@ command/effect each Companion action or inquiry maps to). Check off each row
 after verifying it against real hardware; use Comments for anything
 unexpected (error code, wrong value, etc.).
 
-Total: 125 command test cases, 52 inquiries.
+Total: 143 command test cases, 52 inquiries.
 
 An automated equivalent of this plan lives at `tools/camera-check.mjs` -- it
 sends the same commands over a real serial connection and validates the
@@ -18,12 +18,18 @@ finished, turns AEC/AWB back on and calls `reset_settings`. Run it with:
 VISCA_TEST_PORT=/dev/ttyUSB0 npm run test:hardware
 ```
 
-Destructive commands (Settings Save/Reset, Memory) are skipped *as test
+Destructive commands (Settings Save/Reset/Load, Memory) are skipped *as test
 cases* by default -- pass `--include-destructive` to include them. Settings
 Reset is still always run once at the very end regardless, as the cleanup
 step described above. `OSD` is always skipped (visually disruptive to
 anyone monitoring the feed). It is not part of `npm test`, and requires a
 camera attached.
+
+Gain (ISO) and Shutter (Speed) run a few spot-check values (min/mid/max),
+not all 18/17 named steps -- they share `cam_gain_direct`'s/
+`cam_shutter_direct`'s exact wire encoding (already exercised by the direct
+tests), so this just confirms real hardware round-trips the precomputed raw
+value for a representative sample rather than re-deriving the formula.
 
 ## Commands
 
@@ -32,7 +38,7 @@ camera attached.
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
 | IF Clear | protocol IF_Clear ack only, not a ProVideo command | [ ] | |
-| Settings Save | not implemented in current firmware (func 0xA5 unhandled) | [ ] | |
+| Settings Save | save_settings | [ ] | |
 | Settings Reset | reset_settings | [ ] | |
 | Memory: Reset | not implemented in current firmware (func 0x3F unhandled) | [ ] | |
 | Memory: Set | not implemented in current firmware (func 0x3F unhandled) | [ ] | |
@@ -84,6 +90,23 @@ camera attached.
 | Shutter: up | read-modify-write (+93us) | [ ] | |
 | Shutter: down | read-modify-write (-93us) | [ ] | |
 | Shutter (direct) | cam_exposure <raw=<value>>  // real range is 100-38339us (observed on real hardware); raw is 0-4095, linearly scaled, not a placeholder | [ ] | |
+| Shutter (Speed): 1/8000 | cam_exposure <raw=2> (125us) | [ ] | |
+| Shutter (Speed): 1/4000 | cam_exposure <raw=16> (250us) | [ ] | |
+| Shutter (Speed): 1/2000 | cam_exposure <raw=42> (500us) | [ ] | |
+| Shutter (Speed): 1/1000 | cam_exposure <raw=96> (1000us) | [ ] | |
+| Shutter (Speed): 1/800 | cam_exposure <raw=123> (1250us) | [ ] | |
+| Shutter (Speed): 1/600 | cam_exposure <raw=167> (1667us) | [ ] | |
+| Shutter (Speed): 1/500 | cam_exposure <raw=203> (2000us) | [ ] | |
+| Shutter (Speed): 1/400 | cam_exposure <raw=257> (2500us) | [ ] | |
+| Shutter (Speed): 1/250 | cam_exposure <raw=417> (4000us) | [ ] | |
+| Shutter (Speed): 1/200 | cam_exposure <raw=524> (5000us) | [ ] | |
+| Shutter (Speed): 1/125 | cam_exposure <raw=846> (8000us) | [ ] | |
+| Shutter (Speed): 1/120 | cam_exposure <raw=881> (8333us) | [ ] | |
+| Shutter (Speed): 1/100 | cam_exposure <raw=1060> (10000us) | [ ] | |
+| Shutter (Speed): 1/60 | cam_exposure <raw=1774> (16667us) | [ ] | |
+| Shutter (Speed): 1/50 | cam_exposure <raw=2131> (20000us) | [ ] | |
+| Shutter (Speed): 1/33 | cam_exposure <raw=3234> (30303us) | [ ] | |
+| Shutter (Speed): 1/30 | cam_exposure <raw=3558> (33333us) | [ ] | |
 | Flicker: Off | read-modify-write of aec (taf=10000, same as 50Hz -- taf cannot be disabled) | [ ] | |
 | Flicker: 50Hz | read-modify-write of aec (taf=10000) | [ ] | |
 | Flicker: 60Hz | read-modify-write of aec (taf=8333) | [ ] | |
@@ -216,6 +239,7 @@ camera attached.
 | Auto Save: On | auto_save 1 | [ ] | |
 | Timecode Hold: Run | timecode_hold 0 | [ ] | |
 | Timecode Hold: Hold | timecode_hold 1 | [ ] | |
+| Load Settings | load_settings | [ ] | |
 
 ## Inquiries (Read-back)
 

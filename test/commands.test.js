@@ -17,6 +17,9 @@ import {
 	GAIN_ISO,
 	GAIN_ISO_STEPS,
 	isoToGainRaw,
+	SHUTTER_SPEEDS,
+	SHUTTER_SPEED_STEPS,
+	shutterUsToRaw,
 	RUD,
 	TERMINATOR,
 	encodeNibbles,
@@ -28,7 +31,7 @@ import {
 } from '../commands.js'
 
 const isByte = (b) => Number.isInteger(b) && b >= 0 && b <= 0xff
-const KINDS = new Set(['enum', 'rud', 'direct', 'fixed', 'video', 'iso'])
+const KINDS = new Set(['enum', 'rud', 'direct', 'fixed', 'video', 'iso', 'shutter'])
 const DECODES = new Set(['enum', 'value', 'version', 'system'])
 
 // return every raw payload a command can emit (for structural checks)
@@ -104,7 +107,7 @@ test('every COMMANDS entry is well-formed', () => {
 		} else if (c.kind === 'fixed') {
 			assert.ok(Array.isArray(c.bytes) && c.bytes.every(isByte), `${id}: bytes`)
 			assert.equal(c.bytes[0], 0x01, `${id}: not a command (0x01)`)
-		} else if (c.kind === 'iso') {
+		} else if (c.kind === 'iso' || c.kind === 'shutter') {
 			assert.ok(Array.isArray(c.prefix) && c.prefix.every(isByte), `${id}: prefix`)
 			assert.equal(c.prefix[0], 0x01, `${id}: not a command (0x01)`)
 			assert.ok([1, 2, 3, 4].includes(c.nibbles), `${id}: nibbles must be 1-4`)
@@ -231,6 +234,56 @@ test('the raw Gain (direct) number control is left untouched alongside the new I
 	assert.equal(COMMANDS.cam_gain_direct.nibbles, 3)
 	// the ISO control is additive and is NOT turned into a knob param
 	assert.equal(continuousParams().some((p) => p.id === 'cam_gain_iso'), false)
+})
+
+// --- Shutter (Speed) named-step table ---------------------------------------
+test('SHUTTER_SPEEDS us/raw values match the formula for all 17 steps', () => {
+	assert.deepEqual(SHUTTER_SPEED_STEPS, [8000, 4000, 2000, 1000, 800, 600, 500, 400, 250, 200, 125, 120, 100, 60, 50, 33, 30])
+	assert.equal(SHUTTER_SPEEDS.length, 17)
+	for (const { n, us, raw } of SHUTTER_SPEEDS) {
+		// Recompute independently: us = round(1e6/n) (plain unit conversion),
+		// then invert the firmware's linear raw->real scale with the SAME
+		// truncating integer division unmap_exposure() uses (trunc, NOT round).
+		const expectedUs = Math.round(1e6 / n)
+		assert.equal(us, expectedUs, `1/${n}: us`)
+		const expectedRaw = Math.trunc(((expectedUs - 100) * 4095) / 38239)
+		assert.equal(raw, expectedRaw, `1/${n}: raw`)
+		assert.equal(raw, shutterUsToRaw(us), `1/${n} via shutterUsToRaw`)
+		assert.ok(raw >= 0 && raw <= 4095, `1/${n}: raw in range`)
+	}
+	assert.equal(SHUTTER_SPEEDS[0].raw, 2) // 1/8000 -> 125us -> raw 2
+	assert.equal(SHUTTER_SPEEDS.at(-1).raw, 3558) // 1/30 -> 33333us -> raw 3558
+})
+
+test('Shutter (Speed) builds the exact cam_exposure wire frame for spot-check speeds', () => {
+	const c = COMMANDS.cam_shutter_speed
+	assert.equal(c.kind, 'shutter')
+	assert.deepEqual(c.prefix, [0x01, 0x04, 0x4a, 0x00, 0x00])
+	assert.equal(c.nibbles, 3)
+	const raw = (n) => SHUTTER_SPEEDS.find((s) => s.n === n).raw
+	// 1/8000 -> raw 2
+	assert.deepEqual(
+		[...buildFrame(1, [...c.prefix, ...encodeNibbles(raw(8000), c.nibbles)])],
+		[0x81, 0x01, 0x04, 0x4a, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff],
+	)
+	// 1/1000 -> raw 96 (0x060 -> nibbles 0,6,0)
+	assert.deepEqual(
+		[...buildFrame(1, [...c.prefix, ...encodeNibbles(raw(1000), c.nibbles)])],
+		[0x81, 0x01, 0x04, 0x4a, 0x00, 0x00, 0x00, 0x06, 0x00, 0xff],
+	)
+	// 1/30 -> raw 3558 (0xDE6 -> nibbles D,E,6)
+	assert.deepEqual(
+		[...buildFrame(1, [...c.prefix, ...encodeNibbles(raw(30), c.nibbles)])],
+		[0x81, 0x01, 0x04, 0x4a, 0x00, 0x00, 0x0d, 0x0e, 0x06, 0xff],
+	)
+})
+
+test('the raw Shutter (direct) number control is left untouched alongside the new Speed control', () => {
+	assert.equal(COMMANDS.cam_shutter_direct.kind, 'direct')
+	assert.deepEqual(COMMANDS.cam_shutter_direct.prefix, [0x01, 0x04, 0x4a, 0x00, 0x00])
+	assert.equal(COMMANDS.cam_shutter_direct.nibbles, 3)
+	// the Speed control is additive and is NOT turned into a knob param
+	assert.equal(continuousParams().some((p) => p.id === 'cam_shutter_speed'), false)
 })
 
 test('RUD action bytes', () => {

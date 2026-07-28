@@ -9,6 +9,7 @@
 //   fixed  - no-argument payload
 //   video  - cam_system video mode via the SYSTEM table
 //   iso    - cam_gain via the curated GAIN_ISO named-step table (OG03A10)
+//   shutter - cam_exposure via the curated SHUTTER_SPEEDS named-step table
 // INQUIRIES entries carry a payload + a decode descriptor (enum|value|version|system).
 
 export const TERMINATOR = 0xff
@@ -89,6 +90,36 @@ export function isoToGainRaw(iso) {
 // drift from the formula.
 export const GAIN_ISO_STEPS = [140, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400]
 export const GAIN_ISO = GAIN_ISO_STEPS.map((iso) => ({ iso, raw: isoToGainRaw(iso) }))
+
+// --- Shutter (Speed) named-step table ---------------------------------------
+// cam_exposure's wire value is a raw 3-nibble 0-4095 that the firmware
+// linearly scales onto a real microsecond range 100-38339us via truncating
+// integer division (real = 100 + raw*38239/4095; dct-phoenix-zephyr-bsp
+// visca/src/visca_map_exposure.c map_exposure()/unmap_exposure() --
+// CAM_EXPOSURE_MIN/MAX/SPAN/RAW_MAX). Shutter speed is expressed to the user
+// as a photographic "1/n second" fraction; converting n -> microseconds
+// (round(1e6/n)) is a plain unit conversion, not a firmware constant, so it
+// uses ordinary rounding to the nearest microsecond. Converting that real
+// microsecond value to the raw wire value DOES have to match the firmware's
+// exact truncating integer division (same reasoning as Gain (ISO) above):
+//   us(n)   = round(1e6 / n)
+//   raw(us) = trunc((clamp(us, 100, 38339) - 100) * 4095 / 38239)
+const SHUTTER_REAL_MIN = 100
+const SHUTTER_REAL_MAX = 38339
+const SHUTTER_RAW_MAX = 4095
+export function shutterUsToRaw(us) {
+	const clamped = Math.max(SHUTTER_REAL_MIN, Math.min(SHUTTER_REAL_MAX, us))
+	return Math.trunc(((clamped - SHUTTER_REAL_MIN) * SHUTTER_RAW_MAX) / (SHUTTER_REAL_MAX - SHUTTER_REAL_MIN))
+}
+// Curated 1/n shutter-speed steps offered in the "Shutter (Speed)"
+// dropdown/presets. The step LIST is arbitrary/curated (not derivable) so
+// it's a literal; us/raw are computed at load time so they can never drift
+// from the formula.
+export const SHUTTER_SPEED_STEPS = [8000, 4000, 2000, 1000, 800, 600, 500, 400, 250, 200, 125, 120, 100, 60, 50, 33, 30]
+export const SHUTTER_SPEEDS = SHUTTER_SPEED_STEPS.map((n) => {
+	const us = Math.round(1e6 / n)
+	return { n, us, raw: shutterUsToRaw(us) }
+})
 
 // --- codec (ported from visca_frame.py) ------------------------------------
 export function encodeNibbles(value, n) {
@@ -187,6 +218,11 @@ export const COMMANDS = {
 	// cam_exposure's real range is 100-38339us (observed on real hardware);
 	// widened to 3 nibbles (0-4095) for ~9.3us per step, matching the BSP.
 	cam_shutter_direct: { name: 'Shutter (direct)', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x04, 0x4a, 0x00, 0x00), nibbles: 3 },
+	// Shutter (Speed): a curated dropdown of named 1/n shutter speeds that map
+	// to the SAME wire command as cam_shutter_direct (01 04 4A ...) via the
+	// SHUTTER_SPEEDS table above. Purely additive -- the raw cam_shutter_direct
+	// number control is left untouched for manual/precise entry.
+	cam_shutter_speed: { name: 'Shutter (Speed)', group: 'Exposure', kind: 'shutter', prefix: P(0x01, 0x04, 0x4a, 0x00, 0x00), nibbles: 3 },
 	cam_flicker: {
 		name: 'Flicker', group: 'Exposure', kind: 'enum',
 		choices: { Off: P(0x01, 0x04, 0x23, 0x00), '50Hz': P(0x01, 0x04, 0x23, 0x01), '60Hz': P(0x01, 0x04, 0x23, 0x02) },
@@ -388,6 +424,13 @@ export const COMMANDS = {
 
 	dct_auto_save: { name: 'Auto Save', group: 'DCT System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x62, 0x00), On: P(0x01, 0x7e, 0x01, 0x62, 0x01) } },
 	dct_timecode_hold: { name: 'Timecode Hold', group: 'DCT System', kind: 'enum', choices: { Run: P(0x01, 0x7e, 0x01, 0x64, 0x00), Hold: P(0x01, 0x7e, 0x01, 0x64, 0x01) } },
+	// Load Settings: reloads settings from flash (falling back to compiled-in
+	// defaults per-block only if the stored data is missing/corrupt/version-
+	// mismatched) -- distinct from Settings Reset (in-RAM defaults only, no
+	// flash access) and Settings Save (writes current in-RAM state to flash).
+	// No standard VISCA function code exists for this, so it's a DCT vendor
+	// extension (fixed no-argument trigger, sub-opcode 0x67).
+	dct_load_settings: { name: 'Load Settings', group: 'DCT System', kind: 'fixed', bytes: P(0x01, 0x7e, 0x01, 0x67) },
 }
 
 // --- INQUIRIES (read-back) -------------------------------------------------

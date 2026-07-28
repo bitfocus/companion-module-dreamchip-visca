@@ -26,8 +26,6 @@ added on the firmware side (and, where noted, a matching camera command).
       it can be supported at all.
 
 ### System
-- [ ] **Settings Save** (`0xA5 0x10`) → `save_settings`.
-- [ ] **Settings Reset** (`0xA0 0x10`) → `reset_settings`.
 - [ ] **Memory** (`cam_memory`, `0x3F`) — recall / set / reset.
 
 ### Video

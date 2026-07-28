@@ -1,5 +1,5 @@
 import { InstanceBase, InstanceStatus, Regex, TCPHelper, runEntrypoint, combineRgb } from '@companion-module/base'
-import { COMMANDS, INQUIRIES, ENUM, SYSTEM, SYSTEM_NAMES, GAIN_ISO, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams } from './commands.js'
+import { COMMANDS, INQUIRIES, ENUM, SYSTEM, SYSTEM_NAMES, GAIN_ISO, SHUTTER_SPEEDS, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams } from './commands.js'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
 const GREEN = combineRgb(0, 102, 0)
@@ -239,6 +239,12 @@ class DctViscaInstance extends InstanceBase {
 					const raw = GAIN_ISO.find((g) => g.iso === Number(ev.options.iso))?.raw ?? 0
 					this.send([...c.prefix, ...encodeNibbles(raw, c.nibbles)])
 				}
+			} else if (c.kind === 'shutter') {
+				a.options = [{ type: 'dropdown', id: 'n', label: 'Shutter speed', default: SHUTTER_SPEEDS[0].n, choices: SHUTTER_SPEEDS.map((s) => ({ id: s.n, label: `1/${s.n}` })) }]
+				a.callback = (ev) => {
+					const raw = SHUTTER_SPEEDS.find((s) => s.n === Number(ev.options.n))?.raw ?? 0
+					this.send([...c.prefix, ...encodeNibbles(raw, c.nibbles)])
+				}
 			}
 			actions[id] = a
 		}
@@ -285,6 +291,10 @@ class DctViscaInstance extends InstanceBase {
 			} else if (c.kind === 'iso') {
 				for (const g of GAIN_ISO) {
 					presets[`${id}_${g.iso}`] = btn(c.group, `${c.name}: ISO ${g.iso}`, `${c.name}\\nISO ${g.iso}`, id, { iso: g.iso })
+				}
+			} else if (c.kind === 'shutter') {
+				for (const s of SHUTTER_SPEEDS) {
+					presets[`${id}_${s.n}`] = btn(c.group, `${c.name}: 1/${s.n}`, `${c.name}\\n1/${s.n}`, id, { n: s.n })
 				}
 			}
 		}

@@ -120,7 +120,7 @@ export const PROVIDEO_NAMES = {
 	// (present as a Companion command/inquiry, but no dispatcher recognizes
 	// the function code yet — the camera will reply 0x60/0x41.)
 	cam_memory: { cmd: null, note: 'not implemented in current firmware (func 0x3F unhandled)' },
-	cam_settings_save: { cmd: null, note: 'not implemented in current firmware (func 0xA5 unhandled)' },
+	cam_settings_save: { cmd: 'save_settings', scaled: false },
 	cam_settings_reset: { cmd: 'reset_settings', scaled: false },
 	// SET works (raw wb_preset index passthrough -- no ProVideo command
 	// accepts a settable Kelvin value, only stat_cct exists and it's
@@ -216,6 +216,7 @@ export const PROVIDEO_NAMES = {
 	},
 	dct_auto_save: { cmd: 'auto_save', scaled: false },
 	dct_timecode_hold: { cmd: 'timecode_hold', scaled: false },
+	dct_load_settings: { cmd: 'load_settings', scaled: false },
 
 	// aec's 3 individually-exposed fields: none of these are standalone
 	// commands -- they each set one positional argument of the much larger

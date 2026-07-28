@@ -20,7 +20,7 @@
 //   node tools/camera-check.mjs --group Exposure   (filter by COMMANDS group)
 //   node tools/camera-check.mjs --only gain        (filter by id/name substring)
 
-import { COMMANDS, INQUIRIES, RUD, TERMINATOR, encodeNibbles, buildFrame, decodeReply, continuousParams } from '../commands.js'
+import { COMMANDS, INQUIRIES, RUD, TERMINATOR, encodeNibbles, buildFrame, decodeReply, continuousParams, GAIN_ISO, SHUTTER_SPEEDS } from '../commands.js'
 
 const PORT = process.env.VISCA_TEST_PORT
 const BAUD = Number(process.env.VISCA_TEST_BAUD) || 115200
@@ -172,10 +172,18 @@ function rudTolerance(spec) {
 // source backs the readback) -- SET-only, ACK+Completion check.
 const NO_VERIFY_DIRECT = new Set(['color_temp_direct'])
 
+// Gain (ISO)/Shutter (Speed) share cam_gain_direct's/cam_shutter_direct's
+// exact wire encoding (already exercised by runDirect), so a "few" spot
+// checks (not all 18/17 named steps) are enough here to confirm the real
+// hardware accepts the GAIN_ISO/SHUTTER_SPEEDS table's computed raw values --
+// min, a mid-range value, and max, per control.
+const ISO_SPOT_CHECK = [140, 800, 6400]
+const SHUTTER_SPOT_CHECK = [8000, 500, 30]
+
 // Destructive/risky on real hardware: writes EEPROM, reloads persisted
 // settings, or (video mode) disrupts a live signal. Skipped unless
 // --include-destructive.
-const DESTRUCTIVE_IDS = new Set(['cam_settings_save', 'cam_settings_reset', 'cam_memory', 'cam_system'])
+const DESTRUCTIVE_IDS = new Set(['cam_settings_save', 'cam_settings_reset', 'dct_load_settings', 'cam_memory', 'cam_system'])
 
 // Always skipped, regardless of --include-destructive: not destructive, just
 // not wanted in this run (toggling OSD on/off is visually disruptive to
@@ -230,6 +238,14 @@ function buildCases() {
 			}
 		} else if (c.kind === 'direct') {
 			cases.push({ id, label: c.name, run: () => runDirect(id) })
+		} else if (c.kind === 'iso') {
+			for (const iso of ISO_SPOT_CHECK) {
+				cases.push({ id, label: `${c.name}: ISO ${iso}`, run: () => runIso(iso) })
+			}
+		} else if (c.kind === 'shutter') {
+			for (const n of SHUTTER_SPOT_CHECK) {
+				cases.push({ id, label: `${c.name}: 1/${n}`, run: () => runShutterSpeed(n) })
+			}
 		}
 	}
 	deferred.sort((a, b) => DEFERRED_ORDER.indexOf(a.id) - DEFERRED_ORDER.indexOf(b.id))
@@ -356,6 +372,38 @@ async function runDirect(id) {
 	return Math.abs(got - value) <= 2
 		? { pass: true, detail: `set ${value}, read back ${got}` }
 		: { pass: false, detail: `set ${value}, read back ${got}` }
+}
+
+// Gain (ISO)/Shutter (Speed) share cam_gain_direct's/cam_shutter_direct's
+// exact wire prefix, and their inquiry ('gain'/'shutter') replies the RAW
+// wire value too (same as runDirect's check) -- so this just confirms real
+// hardware round-trips the GAIN_ISO/SHUTTER_SPEEDS table's precomputed raw
+// value for a given named step, not a re-derivation of the ISO/shutter math
+// itself (that's covered by the commands.js unit tests).
+async function runIso(iso) {
+	const c = COMMANDS.cam_gain_iso
+	const { raw } = GAIN_ISO.find((g) => g.iso === iso)
+	const res = await setCommand([...c.prefix, ...encodeNibbles(raw, c.nibbles)])
+	if (!res.ok) return { pass: false, detail: describeFailure(res) }
+	const inq = await inquire('gain')
+	if (!inq.ok) return { pass: false, detail: `readback failed: ${describeFailure(inq)}` }
+	const got = Number(inq.value)
+	return Math.abs(got - raw) <= 2
+		? { pass: true, detail: `ISO ${iso} -> raw ${raw}, read back ${got}` }
+		: { pass: false, detail: `ISO ${iso} -> raw ${raw}, read back ${got}` }
+}
+
+async function runShutterSpeed(n) {
+	const c = COMMANDS.cam_shutter_speed
+	const { raw } = SHUTTER_SPEEDS.find((s) => s.n === n)
+	const res = await setCommand([...c.prefix, ...encodeNibbles(raw, c.nibbles)])
+	if (!res.ok) return { pass: false, detail: describeFailure(res) }
+	const inq = await inquire('shutter')
+	if (!inq.ok) return { pass: false, detail: `readback failed: ${describeFailure(inq)}` }
+	const got = Number(inq.value)
+	return Math.abs(got - raw) <= 2
+		? { pass: true, detail: `1/${n} -> raw ${raw}, read back ${got}` }
+		: { pass: false, detail: `1/${n} -> raw ${raw}, read back ${got}` }
 }
 
 function describeFailure(res) {

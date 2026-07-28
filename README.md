@@ -37,7 +37,8 @@ In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
   - reset/up/down commands → a dropdown (Gain, Shutter, Red/Blue Gain, Bright),
   - "direct" commands → a numeric value input,
   - Gain (ISO) → a dropdown of named ISO steps (140–6400, OG03A10 sensor); the raw Gain (direct) input stays for manual entry,
-  - fixed commands → IF Clear, Settings Save/Reset,
+  - Shutter (Speed) → a dropdown of named 1/n shutter speeds (1/8000–1/30); the raw Shutter (direct) input stays for manual entry,
+  - fixed commands → IF Clear, Settings Save/Reset, Load Settings,
   - Video → a dropdown of named modes (1080p30, 1080p25, …, 1080i50), plus "Poll inquiries now",
   - **"Knob: Adjust value (relative)"** → pick a parameter + a signed step (used by
     the knob presets, but also assignable to any button).
