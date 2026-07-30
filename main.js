@@ -1,5 +1,6 @@
 import { InstanceBase, InstanceStatus, Regex, TCPHelper, runEntrypoint, combineRgb } from '@companion-module/base'
 import { COMMANDS, INQUIRIES, ENUM, SYSTEM, SYSTEM_NAMES, GAIN_ISO, SHUTTER_SPEEDS, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams, progressBar } from './commands.js'
+import { KNOB_RING_PNG } from './images.js'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
 const GREEN = combineRgb(0, 102, 0)
@@ -306,7 +307,7 @@ class DctViscaInstance extends InstanceBase {
 				category: `Knobs: ${p.group}`,
 				name: `${p.name} (knob)`,
 				options: { rotaryActions: true },
-				style: { text: p.name, size: 'auto', color: WHITE, bgcolor: BLUE },
+				style: { text: p.name, size: 'auto', color: WHITE, bgcolor: BLUE, png64: KNOB_RING_PNG },
 				steps: [
 					{
 						down: [{ actionId: 'poll_now', options: {} }],

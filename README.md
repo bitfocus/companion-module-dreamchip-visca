@@ -64,7 +64,10 @@ ready-made **rotary-encoder preset** under the `Knobs: <group>` categories:
   (0–15 params step by 1). It sends an absolute `direct` set and updates the value
   immediately, so it works even with polling off.
 - **Press** → re-reads the camera to re-sync the knob to the real value.
-- The **encoder LCD** shows the parameter name and its current value.
+- The **encoder LCD** shows the parameter name, its current value, and a text
+  progress bar (e.g. `...|......`) marking its position within its range,
+  over a generated ring background (`images.js` — no image dependency, drawn
+  by a small from-scratch PNG encoder at load time).
 
 Drag a knob preset onto a Stream Deck+ encoder (or an encoder in the web/emulator
 surface). To build your own, enable **Rotary Actions** on a button and map
