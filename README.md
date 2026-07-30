@@ -10,7 +10,7 @@ Kelvin), picture (gamma, brightness, contrast, flip/mirror), video mode,
 flicker, memory, settings save/reset — plus Dream Chip vendor extensions
 (green gain, gain mode, black levels, flare, AWB speed, S-Log3 gain, colour
 space, PQ, noise reduction, detail/denoise, LUT mode/preset, SDI
-range/levels, MCC op-mode, OSD, audio, timecode hold, white-balance colour
+range/levels, MCC op-mode, OSD, audio, Timecode, white-balance colour
 temperature (settable Kelvin + measured scene cct)). Pan/tilt/zoom/focus are
 out of scope.
 

@@ -20,6 +20,7 @@ import {
 	SHUTTER_SPEEDS,
 	SHUTTER_SPEED_STEPS,
 	shutterUsToRaw,
+	progressBar,
 	RUD,
 	TERMINATOR,
 	encodeNibbles,
@@ -373,6 +374,34 @@ test('continuousParams cover every direct command and map to a real inquiry vari
 		assert.equal(p.max, expectedMax, `${p.id}: max derived from nibbles/signed, unless narrowed`)
 		assert.equal(p.min, expectedMin, `${p.id}: min derived from nibbles/signed, unless narrowed`)
 	}
+})
+
+// --- progressBar (knob feedback's text position bar) -----------------------
+test('progressBar marks the "|" position proportionally to value within [min,max]', () => {
+	assert.equal(progressBar(0, 0, 100, 10), '|..........')
+	assert.equal(progressBar(100, 0, 100, 10), '..........|')
+	assert.equal(progressBar(50, 0, 100, 10), '.....|.....')
+	assert.equal(progressBar(30, 0, 100, 10), '...|.......')
+	// negative range
+	assert.equal(progressBar(-6, -6, 12, 6), '|......')
+	assert.equal(progressBar(12, -6, 12, 6), '......|')
+})
+
+test('progressBar clamps out-of-range values instead of erroring', () => {
+	assert.equal(progressBar(-50, 0, 100, 10), progressBar(0, 0, 100, 10))
+	assert.equal(progressBar(150, 0, 100, 10), progressBar(100, 0, 100, 10))
+})
+
+test('progressBar renders all dashes for non-finite values or a degenerate range', () => {
+	assert.equal(progressBar(NaN, 0, 100, 10), '-'.repeat(10))
+	assert.equal(progressBar(undefined, 0, 100, 10), '-'.repeat(10))
+	assert.equal(progressBar(50, 10, 10, 10), '-'.repeat(10)) // max <= min
+	assert.equal(progressBar(50, 20, 10, 10), '-'.repeat(10)) // max < min
+})
+
+test('progressBar defaults to width 10 and always returns width+1 characters (the "|" marker plus the dots)', () => {
+	assert.equal(progressBar(50, 0, 100).length, 11)
+	assert.equal(progressBar(5, 0, 10, 4).length, 5)
 })
 
 test('a continuous param builds the expected absolute-set frame', () => {

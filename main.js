@@ -1,5 +1,5 @@
 import { InstanceBase, InstanceStatus, Regex, TCPHelper, runEntrypoint, combineRgb } from '@companion-module/base'
-import { COMMANDS, INQUIRIES, ENUM, SYSTEM, SYSTEM_NAMES, GAIN_ISO, SHUTTER_SPEEDS, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams } from './commands.js'
+import { COMMANDS, INQUIRIES, ENUM, SYSTEM, SYSTEM_NAMES, GAIN_ISO, SHUTTER_SPEEDS, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams, progressBar } from './commands.js'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
 const GREEN = combineRgb(0, 102, 0)
@@ -354,7 +354,8 @@ class DctViscaInstance extends InstanceBase {
 					const p = this.paramById?.[fb.options.param]
 					if (!p) return {}
 					const v = this.state[p.varId]
-					return { text: `${p.name}\\n${v ?? '--'}`, size: 'auto' }
+					const bar = progressBar(Number(v), p.min, p.max)
+					return { text: `${p.name}\\n${v ?? '--'}\\n${bar}`, size: 'auto' }
 				},
 			},
 		})

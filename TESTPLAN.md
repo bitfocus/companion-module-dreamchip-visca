@@ -5,7 +5,7 @@ command/effect each Companion action or inquiry maps to). Check off each row
 after verifying it against real hardware; use Comments for anything
 unexpected (error code, wrong value, etc.).
 
-Total: 143 command test cases, 55 inquiries.
+Total: 100 command test cases, 52 inquiries.
 
 An automated equivalent of this plan lives at `tools/camera-check.mjs` -- it
 sends the same commands over a real serial connection and validates the
@@ -18,18 +18,12 @@ finished, turns AEC/AWB back on and calls `reset_settings`. Run it with:
 VISCA_TEST_PORT=/dev/ttyUSB0 npm run test:hardware
 ```
 
-Destructive commands (Settings Save/Reset/Load, Memory) are skipped *as test
+Destructive commands (Settings Save/Reset, Memory) are skipped *as test
 cases* by default -- pass `--include-destructive` to include them. Settings
 Reset is still always run once at the very end regardless, as the cleanup
 step described above. `OSD` is always skipped (visually disruptive to
 anyone monitoring the feed). It is not part of `npm test`, and requires a
 camera attached.
-
-Gain (ISO) and Shutter (Speed) run a few spot-check values (min/mid/max),
-not all 18/17 named steps -- they share `cam_gain_direct`'s/
-`cam_shutter_direct`'s exact wire encoding (already exercised by the direct
-tests), so this just confirms real hardware round-trips the precomputed raw
-value for a representative sample rather than re-deriving the formula.
 
 ## Commands
 
@@ -37,209 +31,166 @@ value for a representative sample rather than re-deriving the formula.
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| IF Clear | protocol IF_Clear ack only, not a ProVideo command | [ ] | |
-| Settings Save | save_settings | [ ] | |
-| Settings Reset | reset_settings | [ ] | |
-| Memory: Reset | not implemented in current firmware (func 0x3F unhandled) | [ ] | |
-| Memory: Set | not implemented in current firmware (func 0x3F unhandled) | [ ] | |
-| Memory: Recall | not implemented in current firmware (func 0x3F unhandled) | [ ] | |
+| IF Clear | protocol IF_Clear ack only, not a ProVideo command | [N] | |
+| Settings Save | not implemented in current firmware (func 0xA5 unhandled) | [N] | |
+| Settings Reset | reset_settings | [Y] | |
+| Memory: Reset | not implemented in current firmware (func 0x3F unhandled) | [N] | |
+| Memory: Set | not implemented in current firmware (func 0x3F unhandled) | [N] | |
+| Memory: Recall | not implemented in current firmware (func 0x3F unhandled) | [N] | |
 
 ### Video
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| Video: 1080p30 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
-| Video: 1080p25 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
-| Video: 1080p24 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
-| Video: 1080p23.98 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
-| Video: 1080p50 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
-| Video: 1080p60 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
-| Video: 1080i60 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
-| Video: 1080i50 | video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping | [ ] | |
+| Video Mode | (select video mode, see SYSTEM table in commands.js) | [N] | wrapped in CONFIG_VISCA_CMD_LENS_STUB, currently disabled|
 
 ### Exposure
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| AE Mode: Full Auto | aec 1 | [ ] | |
-| AE Mode: Manual | aec 0 | [ ] | |
-| AE Mode: Shutter Pri | aec 1 | [ ] | |
-| Gain: reset | cam_gain 1000 | [ ] | |
-| Gain: up | read-modify-write (+109) | [ ] | |
-| Gain: down | read-modify-write (-109) | [ ] | |
-| Gain (direct) | cam_gain <raw=<value>>  // real range is 1000-45715 (1x/0dB/140 ISO min; max from the current AUTO gain-mode range); raw is 0-4095, linearly scaled, not a placeholder | [ ] | |
-| Gain (ISO): ISO 140 | cam_gain <raw=0> (ISO 140, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 160 | cam_gain <raw=13> (ISO 160, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 200 | cam_gain <raw=39> (ISO 200, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 250 | cam_gain <raw=71> (ISO 250, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 320 | cam_gain <raw=117> (ISO 320, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 400 | cam_gain <raw=170> (ISO 400, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 500 | cam_gain <raw=235> (ISO 500, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 640 | cam_gain <raw=327> (ISO 640, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 800 | cam_gain <raw=431> (ISO 800, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 1000 | cam_gain <raw=562> (ISO 1000, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 1250 | cam_gain <raw=726> (ISO 1250, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 1600 | cam_gain <raw=954> (ISO 1600, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 2000 | cam_gain <raw=1216> (ISO 2000, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 2500 | cam_gain <raw=1543> (ISO 2500, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 3200 | cam_gain <raw=2001> (ISO 3200, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 4000 | cam_gain <raw=2524> (ISO 4000, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 5000 | cam_gain <raw=3179> (ISO 5000, OG03A10 sensor) | [ ] | |
-| Gain (ISO): ISO 6400 | cam_gain <raw=4094> (ISO 6400, OG03A10 sensor) | [ ] | |
-| Shutter: reset | cam_exposure 1000 | [ ] | |
-| Shutter: up | read-modify-write (+93us) | [ ] | |
-| Shutter: down | read-modify-write (-93us) | [ ] | |
-| Shutter (direct) | cam_exposure <raw=<value>>  // real range is 100-38339us (observed on real hardware); raw is 0-4095, linearly scaled, not a placeholder | [ ] | |
-| Shutter (Speed): 1/8000 | cam_exposure <raw=2> (125us) | [ ] | |
-| Shutter (Speed): 1/4000 | cam_exposure <raw=16> (250us) | [ ] | |
-| Shutter (Speed): 1/2000 | cam_exposure <raw=42> (500us) | [ ] | |
-| Shutter (Speed): 1/1000 | cam_exposure <raw=96> (1000us) | [ ] | |
-| Shutter (Speed): 1/800 | cam_exposure <raw=123> (1250us) | [ ] | |
-| Shutter (Speed): 1/600 | cam_exposure <raw=167> (1667us) | [ ] | |
-| Shutter (Speed): 1/500 | cam_exposure <raw=203> (2000us) | [ ] | |
-| Shutter (Speed): 1/400 | cam_exposure <raw=257> (2500us) | [ ] | |
-| Shutter (Speed): 1/250 | cam_exposure <raw=417> (4000us) | [ ] | |
-| Shutter (Speed): 1/200 | cam_exposure <raw=524> (5000us) | [ ] | |
-| Shutter (Speed): 1/125 | cam_exposure <raw=846> (8000us) | [ ] | |
-| Shutter (Speed): 1/120 | cam_exposure <raw=881> (8333us) | [ ] | |
-| Shutter (Speed): 1/100 | cam_exposure <raw=1060> (10000us) | [ ] | |
-| Shutter (Speed): 1/60 | cam_exposure <raw=1774> (16667us) | [ ] | |
-| Shutter (Speed): 1/50 | cam_exposure <raw=2131> (20000us) | [ ] | |
-| Shutter (Speed): 1/33 | cam_exposure <raw=3234> (30303us) | [ ] | |
-| Shutter (Speed): 1/30 | cam_exposure <raw=3558> (33333us) | [ ] | |
-| Flicker: Off | read-modify-write of aec (taf=10000, same as 50Hz -- taf cannot be disabled) | [ ] | |
-| Flicker: 50Hz | read-modify-write of aec (taf=10000) | [ ] | |
-| Flicker: 60Hz | read-modify-write of aec (taf=8333) | [ ] | |
-| AEC SetPoint | aec <raw=<value>>  // sets aec's positional arg 2 (setPoint), real range 50-3000, via read-modify-write of all 10 args | [ ] | |
-| AEC Speed | aec <raw=<value>>  // sets aec's positional arg 3 (speed), real range 1-30, via read-modify-write of all 10 args | [ ] | |
-| AEC Max Gain | aec <raw=<value>>  // sets aec's positional arg 9 (maxGain), real range 1000-45715 (same as cam_gain), via read-modify-write of all 10 args | [ ] | |
+| AE Mode: Full Auto | aec 1 | [ Y] | |
+| AE Mode: Manual | aec 0 | [ Y] | |
+| AE Mode: Shutter Pri | aec 1 | [ Y] | |
+| Gain: reset | cam_gain 1000 | [ Y] | |
+| Gain: up | read-modify-write (+109) | [ Y] | |
+| Gain: down | read-modify-write (-109) | [ Y] | |
+| Gain (direct) | cam_gain <raw=<value>>  // real range is 1000-45715 (1x/0dB/140 ISO min; max from the current AUTO gain-mode range); raw is 0-4095, linearly scaled, not a placeholder | [ Y] | |
+| Shutter: reset | cam_exposure 10000 | [ Y] | |
+| Shutter: up | read-modify-write (+93us) | [ Y] | |
+| Shutter: down | read-modify-write (-93us) | [ Y] | |
+| Shutter (direct) | cam_exposure <raw=<value>>  // real range is 100-38339us (observed on real hardware); raw is 0-4095, linearly scaled, not a placeholder | [ Y] | |
+| Flicker: Off | read-modify-write of aec (taf=10000, same as 50Hz -- taf cannot be disabled) | [ Y] | |
+| Flicker: 50Hz | read-modify-write of aec (taf=10000) | [ Y] | |
+| Flicker: 60Hz | read-modify-write of aec (taf=8333) | [ Y] | |
+| AEC SetPoint | aec <raw=<value>>  // sets aec's positional arg 2 (setPoint), real range 50-3000, via read-modify-write of all 10 args | [ Y] | |
+| AEC Speed | aec <raw=<value>>  // sets aec's positional arg 3 (speed), real range 1-30, via read-modify-write of all 10 args | [ Y] | |
+| AEC Max Gain | aec <raw=<value>>  // sets aec's positional arg 9 (maxGain), real range 1000-45715 (same as cam_gain), via read-modify-write of all 10 args | [ Y] | dont see effect|
 
 ### White Balance
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| White Balance: Auto | awb 1 | [ ] | |
-| White Balance: Indoor | wb_preset 1 | [ ] | |
-| White Balance: Outdoor | wb_preset 2 | [ ] | |
-| White Balance: Manual | awb 0 | [ ] | |
-| White Balance: Color Temp | wb_preset is real (see Color Temp (direct)), but this VISCA path (func 0x35 data 0x20) has no room for a preset index -- always errors | [ ] | |
-| White Balance: Trigger | wb | [ ] | |
-| Red Gain: reset | gain_red 512 | [ ] | |
-| Red Gain: up | read-modify-write (+step) | [ ] | |
-| Red Gain: down | read-modify-write (-step) | [ ] | |
-| Red Gain (direct) | gain_red <value> | [ ] | |
-| Blue Gain: reset | gain_blue 512 | [ ] | |
-| Blue Gain: up | read-modify-write (+step) | [ ] | |
-| Blue Gain: down | read-modify-write (-step) | [ ] | |
-| Blue Gain (direct) | gain_blue <value> | [ ] | |
-| Color Gain (direct) | post_sat <value> | [ ] | |
-| Color Hue (direct) | post_hue <value> | [ ] | |
-| Color Temp (direct) | wb_preset <value> | [ ] | |
-| Color Temp (Kelvin) | wb_temp <value> | [ ] | UI range hardcoded 2200-10000; firmware rejects out-of-range per live per-sensor min/max |
-| Green Gain: Reset | gain_green 256 | [ ] | |
-| Green Gain: Up | read-modify-write (+step) | [ ] | |
-| Green Gain: Down | read-modify-write (-step) | [ ] | |
-| Green Gain (direct) | gain_green <value> | [ ] | |
+| White Balance: Auto | awb 1 | [ Y] | |
+| White Balance: Indoor | wb_preset 1 | [ Y] | |
+| White Balance: Outdoor | wb_preset 2 | [ Y] | |
+| White Balance: Manual | awb 0 | [ Y] | |
+| White Balance: Color Temp | not implemented in current firmware (Color Temp unsupported) | [ N] | |
+| White Balance: Trigger | wb | [ Y] | |
+| Red Gain: reset | gain_red 512 | [ Y] | |
+| Red Gain: up | read-modify-write (+step) | [ Y] | |
+| Red Gain: down | read-modify-write (-step) | [ Y] | |
+| Red Gain (direct) | gain_red <value> | [ Y] | |
+| Blue Gain: reset | gain_blue 512 | [ Y] | |
+| Blue Gain: up | read-modify-write (+step) | [ Y] | |
+| Blue Gain: down | read-modify-write (-step) | [ Y] | |
+| Blue Gain (direct) | gain_blue <value> | [ Y] | |
+| Color Gain (direct) | post_sat <value> | [ Y] | |
+| Color Hue (direct) | post_hue <value> | [ Y] | |
+| Color Temp (direct) | wb_preset <value> | [ Y] | query: cannot parse return string|
+| Green Gain: Reset | gain_green 256 | [ Y] | |
+| Green Gain: Up | read-modify-write (+step) | [ Y] | |
+| Green Gain: Down | read-modify-write (-step) | [ Y] | |
+| Green Gain (direct) | gain_green <value> | [ Y] | |
 
 ### Picture
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| Gamma: BT.709 | log_mode 0 | [ ] | |
-| Gamma: HLG | log_mode 1 | [ ] | |
-| Gamma: PQ | log_mode 2 | [ ] | |
-| Gamma: S-Log3 | log_mode 3 | [ ] | |
-| Bright: reset | post_bright 0 | [ ] | |
-| Bright: up | read-modify-write (+5) | [ ] | |
-| Bright: down | read-modify-write (-5) | [ ] | |
-| Bright (direct) | post_bright <value> | [ ] | |
-| Contrast (direct) | post_cont <value> | [ ] | |
-| Flip: Off | flip 0 | [ ] | |
-| Flip: Flip-H | flip 1 | [ ] | |
-| Flip: Flip-V | flip 2 | [ ] | |
-| Flip: Flip-HV | flip 3 | [ ] | |
+| Gamma: BT.709 | log_mode 0 | [ Y] | |
+| Gamma: HLG | log_mode 1 | [ Y] | |
+| Gamma: PQ | log_mode 2 | [ Y] | |
+| Gamma: S-Log3 | log_mode 3 | [ Y] | |
+| Bright: reset | post_bright 0 | [ Y] | |
+| Bright: up | read-modify-write (+5) | [ Y] | |
+| Bright: down | read-modify-write (-5) | [ Y] | |
+| Bright (direct) | post_bright <value> | [ Y] | |
+| Contrast (direct) | post_cont <value> | [ Y] | |
+| Flip: Off | flip 0 | [ Y] | |
+| Flip: Flip-H | flip 1 | [ Y] | |
+| Flip: Flip-V | flip 2 | [ Y] | |
+| Flip: Flip-HV | flip 3 | [ Y] | |
 
 ### DCT Gain
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| Gain Mode: Auto | gain_mode 0 | [ ] | |
-| Gain Mode: LCG | gain_mode 1 | [ ] | |
-| Gain Mode: HCG | gain_mode 2 | [ ] | |
+| Gain Mode: Auto | gain_mode 0 | [ Y] | |
+| Gain Mode: LCG | gain_mode 1 | [ Y] | |
+| Gain Mode: HCG | gain_mode 2 | [ Y] | |
 
 ### DCT Black
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| Black Master | black_master <value> | [ ] | |
-| Black Red | black_red <raw=<value>>  // real range is signed -4096..4095 (ISP_BLS_MIN/MAX); raw is signed -2048..2047, firmware doubles it (x2) | [ ] | |
-| Black Green | black_green <raw=<value>>  // real range is signed -4096..4095 (ISP_BLS_MIN/MAX); raw is signed -2048..2047, firmware doubles it (x2) | [ ] | |
-| Black Blue | black_blue <raw=<value>>  // real range is signed -4096..4095 (ISP_BLS_MIN/MAX); raw is signed -2048..2047, firmware doubles it (x2) | [ ] | |
+| Black Master | black_master <value> | [ Y] | |
+| Black Red | black_red <raw=<value>>  // real range is signed -4096..4095 (ISP_BLS_MIN/MAX); raw is signed -2048..2047, firmware doubles it (x2) | [ Y] | |
+| Black Green | black_green <raw=<value>>  // real range is signed -4096..4095 (ISP_BLS_MIN/MAX); raw is signed -2048..2047, firmware doubles it (x2) | [ Y] | |
+| Black Blue | black_blue <raw=<value>>  // real range is signed -4096..4095 (ISP_BLS_MIN/MAX); raw is signed -2048..2047, firmware doubles it (x2) | [ Y] | |
 
 ### DCT Color
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| Flare Red | flare <raw=<value>>  // sets flare's positional arg 1 (red), real range 0-65535, via read-modify-write of all 3 args; raw is 0-4095, firmware multiplies it by 16 | [ ] | |
-| Flare Green | flare <raw=<value>>  // sets flare's positional arg 2 (green), real range 0-65535, via read-modify-write of all 3 args; raw is 0-4095, firmware multiplies it by 16 | [ ] | |
-| Flare Blue | flare <raw=<value>>  // sets flare's positional arg 3 (blue), real range 0-65535, via read-modify-write of all 3 args; raw is 0-4095, firmware multiplies it by 16 | [ ] | |
-| AWB Speed | awb_speed <raw=<value>>  // real range is 0-2; do_awb_speed hard-rejects raw values above 2 with -EINVAL (unlike filter_detail, which clamps instead of erroring) | [ ] | |
-| S-Log3 Master Gain | slog3_master_gain <raw=<value>>  // real range is signed -6..12 dB (system_settings.h); do_slog3_master_gain hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ ] | |
-| Color Space | color_space <raw=<value>>  // real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP | [ ] | |
-| PQ Max Brightness | pq_max_brightness <raw=<value>>  // real range is 100-10000 cd/m2 (do_pq_max_brightness); raw is 0-4095, linearly scaled, not a placeholder | [ ] | |
-| MCC Op-Mode | mcc_opmode <value> | [ ] | |
+| Flare Red | flare <raw=<value>>  // sets flare's positional arg 1 (red), real range 0-65535, via read-modify-write of all 3 args; raw is 0-4095, firmware multiplies it by 16 | [ Y] | |
+| Flare Green | flare <raw=<value>>  // sets flare's positional arg 2 (green), real range 0-65535, via read-modify-write of all 3 args; raw is 0-4095, firmware multiplies it by 16 | [ Y] | |
+| Flare Blue | flare <raw=<value>>  // sets flare's positional arg 3 (blue), real range 0-65535, via read-modify-write of all 3 args; raw is 0-4095, firmware multiplies it by 16 | [ Y] | |
+| AWB Speed | awb_speed <raw=<value>>  // real range is 0-2; do_awb_speed hard-rejects raw values above 2 with -EINVAL (unlike filter_detail, which clamps instead of erroring) | [ Y] | |
+| S-Log3 Master Gain | slog3_master_gain <raw=<value>>  // real range is signed -6..12 dB (system_settings.h); do_slog3_master_gain hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ Y] | |
+| Color Space | color_space <raw=<value>>  // real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP | [ Y] | |
+| Tone-Mapping Mode | tm_mode <value> | [ ] | |
+| PQ Max Brightness | pq_max_brightness <raw=<value>>  // real range is 100-10000 cd/m2 (do_pq_max_brightness); raw is 0-4095, linearly scaled, not a placeholder | [ Y] | |
+| MCC Op-Mode | mcc_opmode <value> | [ Y] | |
 
 ### DCT Detail/NR
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| CNR Auto: Off | cnr_auto 0 | [ ] | |
-| CNR Auto: On | cnr_auto 1 | [ ] | |
-| CNR Mode | cnr_mode <value> | [ ] | |
-| DPF Enable: Off | dpf_enable 0 | [ ] | |
-| DPF Enable: On | dpf_enable 1 | [ ] | |
-| DPF Strength | dpf_strength <value> | [ ] | |
-| Filter Enable: Off | filter_enable 0 | [ ] | |
-| Filter Enable: On | filter_enable 1 | [ ] | |
-| Filter Detail | filter_detail <raw=<value>>  // real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring | [ ] | |
-| Filter Denoise | filter_denoise <value> | [ ] | |
+| CNR Auto: Off | cnr_auto 0 | [ Y] | |
+| CNR Auto: On | cnr_auto 1 | [ Y] | dont see a change|
+| CNR Mode | cnr_mode <value> | [ Y] | |
+| DPF Enable: Off | dpf_enable 0 | [ N] | |
+| DPF Enable: On | dpf_enable 1 | [ N] | |
+| DPF Strength | dpf_strength <value> | [ N] | |
+| Filter Enable: Off | filter_enable 0 | [ Y] | |
+| Filter Enable: On | filter_enable 1 | [ Y] | |
+| Filter Detail | filter_detail <raw=<value>>  // real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring | [ Y] | |
+| Filter Denoise | filter_denoise <value> | [ Y] | |
 
 ### DCT LUT
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| LUT Mode | lut_mode <raw=<value>>  // real settable range is 0-1 (Interpolate/Fast Gamma, lut_drv.h); do_lut_mode rejects LUT_MODE_FIXED=2 with -EINVAL ("used only internally") | [ ] | |
-| LUT Fixed Mode | lut_fixed_mode <value> | [ ] | |
-| LUT Preset | lut_preset <value> | [ ] | |
+| LUT Mode | lut_mode <raw=<value>>  // real settable range is 0-1 (Interpolate/Fast Gamma, lut_drv.h); do_lut_mode rejects LUT_MODE_FIXED=2 with -EINVAL ("used only internally") | [ Y] | |
+| LUT Fixed Mode | lut_fixed_mode <value> | [ Y] | |
+| LUT Preset | lut_preset <value> | [ Y] | |
 
 ### DCT SDI
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| SDI Range: Legal | sdi_range 0 | [ ] | |
-| SDI Range: Full | sdi_range 1 | [ ] | |
-| SDI Black | sdi_black <raw=<value>>  // real range is signed -60..60; do_sdi_black hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ ] | |
-| SDI White | sdi_white <raw=<value>>  // real range is signed -80..79; do_sdi_white hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ ] | |
+| SDI Range: Legal | sdi_range 0 | [ Y] | |
+| SDI Range: Full | sdi_range 1 | [ Y] | |
+| SDI Black | sdi_black <raw=<value>>  // real range is signed -60..60; do_sdi_black hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ Y | |
+| SDI White | sdi_white <raw=<value>>  // real range is signed -80..79; do_sdi_white hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ Y] | |
 
 ### DCT OSD/Audio
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| OSD: Off | osd 0 | [ ] | |
-| OSD: On | osd 1 | [ ] | |
-| Audio Enable: Off | audio_enable 0 | [ ] | |
-| Audio Enable: On | audio_enable 1 | [ ] | |
-| Audio Gain | audio_gain <raw=<value>>  // real range is 0-65535 (4.12 fixed-point, 4096 = 1.0x unity gain); raw is 0-4095, firmware multiplies it by 16 | [ ] | |
+| OSD: Off | osd 0 | [ N] | |
+| OSD: On | osd 1 | [ N] | not implemented|
+| Audio Enable: Off | audio_enable 0 | [ Y] | |
+| Audio Enable: On | audio_enable 1 | [ Y] | |
+| Audio Gain | audio_gain <raw=<value>>  // real range is 0-65535 (4.12 fixed-point, 4096 = 1.0x unity gain); raw is 0-4095, firmware multiplies it by 16 | [ Y] | |
 
 ### DCT System
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
-| Auto Save: Off | auto_save 0 | [ ] | |
-| Auto Save: On | auto_save 1 | [ ] | |
-| Timecode Hold: Run | timecode_hold 0 | [ ] | |
-| Timecode Hold: Hold | timecode_hold 1 | [ ] | |
-| Load Settings | load_settings | [ ] | |
+| Auto Save: Off | auto_save 0 | [ N] | how to test?|
+| Auto Save: On | auto_save 1 | [ N] | |
+| Timecode: Run | timecode_hold 0 | [ N] | cant see timecode|
+| Timecode: Hold | timecode_hold 1 | [ N] | |
 
 ## Inquiries (Read-back)
 
@@ -254,10 +205,6 @@ value for a representative sample rather than re-deriving the formula.
 | Red Gain | gain_red | [ ] | |
 | Blue Gain | gain_blue | [ ] | |
 | Color Temp | no way to read back the current wb_preset index; SET works, see COMMANDS.color_temp_direct | [ ] | |
-| Color Temp (K) | wb_temp (current field) | [ ] | 4-nibble Kelvin; readback of the last-set whitepoint (0 if none) |
-| Color Temp Min (K) | wb_temp (min field, selector 0x01) | [ ] | live per-sensor calibrated min |
-| Color Temp Max (K) | wb_temp (max field, selector 0x02) | [ ] | live per-sensor calibrated max |
-| Color Temp Measured (K) | wb_temp_measure | [ ] | measured scene cct (lpf_cct_run); inquiry-only |
 | Color Gain | post_sat | [ ] | |
 | Color Hue | post_hue | [ ] | |
 | Gamma | log_mode | [ ] | |
@@ -284,6 +231,7 @@ value for a representative sample rather than re-deriving the formula.
 | Filter Detail | real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring | [ ] | |
 | Filter Denoise | filter_denoise | [ ] | |
 | Color Space | real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP | [ ] | |
+| Tone-Mapping Mode | tm_mode | [ ] | |
 | PQ Max Brightness | real range is 100-10000 cd/m2 (do_pq_max_brightness); raw is 0-4095, linearly scaled, not a placeholder | [ ] | |
 | LUT Mode | real settable range is 0-1 (Interpolate/Fast Gamma, lut_drv.h); do_lut_mode rejects LUT_MODE_FIXED=2 with -EINVAL ("used only internally") | [ ] | |
 | LUT Fixed Mode | lut_fixed_mode | [ ] | |
@@ -294,7 +242,7 @@ value for a representative sample rather than re-deriving the formula.
 | MCC Op-Mode | mcc_opmode | [ ] | |
 | OSD | osd | [ ] | |
 | Auto Save | auto_save | [ ] | |
-| Timecode Hold | timecode_hold | [ ] | |
+| Timecode | timecode_hold | [ ] | |
 | Audio Enable | audio_enable | [ ] | |
 | Audio Gain | real range is 0-65535 (4.12 fixed-point, 4096 = 1.0x unity gain); raw is 0-4095, firmware multiplies it by 16 | [ ] | |
 | AEC SetPoint | sets aec's positional arg 2 (setPoint), real range 50-3000, via read-modify-write of all 10 args | [ ] | |

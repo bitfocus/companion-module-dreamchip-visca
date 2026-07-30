@@ -439,15 +439,15 @@ export const COMMANDS = {
 	// isi_access_get_gain_range query); 3 nibbles, linearly scaled.
 	dct_aec_maxgain: { name: 'AEC Max Gain', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1a), nibbles: 3 },
 
-	dct_auto_save: { name: 'Auto Save', group: 'DCT System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x62, 0x00), On: P(0x01, 0x7e, 0x01, 0x62, 0x01) } },
-	dct_timecode_hold: { name: 'Timecode Hold', group: 'DCT System', kind: 'enum', choices: { Run: P(0x01, 0x7e, 0x01, 0x64, 0x00), Hold: P(0x01, 0x7e, 0x01, 0x64, 0x01) } },
+	dct_auto_save: { name: 'Auto Save', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x62, 0x00), On: P(0x01, 0x7e, 0x01, 0x62, 0x01) } },
+	dct_timecode_hold: { name: 'Timecode', group: 'System', kind: 'enum', choices: { Run: P(0x01, 0x7e, 0x01, 0x64, 0x00), Hold: P(0x01, 0x7e, 0x01, 0x64, 0x01) } },
 	// Load Settings: reloads settings from flash (falling back to compiled-in
 	// defaults per-block only if the stored data is missing/corrupt/version-
 	// mismatched) -- distinct from Settings Reset (in-RAM defaults only, no
 	// flash access) and Settings Save (writes current in-RAM state to flash).
 	// No standard VISCA function code exists for this, so it's a DCT vendor
 	// extension (fixed no-argument trigger, sub-opcode 0x67).
-	dct_load_settings: { name: 'Load Settings', group: 'DCT System', kind: 'fixed', bytes: P(0x01, 0x7e, 0x01, 0x67) },
+	dct_load_settings: { name: 'Load Settings', group: 'System', kind: 'fixed', bytes: P(0x01, 0x7e, 0x01, 0x67) },
 }
 
 // --- INQUIRIES (read-back) -------------------------------------------------
@@ -512,7 +512,7 @@ export const INQUIRIES = {
 	dct_mcc_opmode: { name: 'MCC Op-Mode', varId: 'dct_mcc_opmode', payload: P(0x09, 0x7e, 0x01, 0x40), decode: { type: 'value' } },
 	dct_osd: { name: 'OSD', varId: 'dct_osd', payload: P(0x09, 0x7e, 0x01, 0x52), decode: { type: 'enum', map: ENUM.dct_onoff } },
 	dct_auto_save: { name: 'Auto Save', varId: 'dct_auto_save', payload: P(0x09, 0x7e, 0x01, 0x62), decode: { type: 'enum', map: ENUM.dct_onoff } },
-	dct_timecode_hold: { name: 'Timecode Hold', varId: 'dct_timecode_hold', payload: P(0x09, 0x7e, 0x01, 0x64), decode: { type: 'enum', map: ENUM.dct_timecode_hold } },
+	dct_timecode_hold: { name: 'Timecode', varId: 'dct_timecode_hold', payload: P(0x09, 0x7e, 0x01, 0x64), decode: { type: 'enum', map: ENUM.dct_timecode_hold } },
 	dct_audio_enable: { name: 'Audio Enable', varId: 'dct_audio_enable', payload: P(0x09, 0x7e, 0x01, 0x65), decode: { type: 'enum', map: ENUM.dct_onoff } },
 	dct_audio_gain: { name: 'Audio Gain', varId: 'dct_audio_gain', payload: P(0x09, 0x7e, 0x01, 0x66), decode: { type: 'value' } },
 	dct_aec_setpoint: { name: 'AEC SetPoint', varId: 'dct_aec_setpoint', payload: P(0x09, 0x7e, 0x01, 0x18), decode: { type: 'value' } },
@@ -554,4 +554,17 @@ export function continuousParams() {
 				max: c.max ?? wireMax,
 			}
 		})
+}
+
+// Render a value's position within [min,max] as a compact text bar, e.g.
+// progressBar(30, 0, 100) -> "...|......" -- the same technique
+// companion-module-sony-visca uses for its rotary-knob presets (a
+// dynamically-positioned marker in a fixed-width dot string), rather than a
+// per-value drawn image. Out-of-range values clamp; a non-finite value or a
+// degenerate [min,max] (max <= min) renders as all dashes.
+export function progressBar(value, min, max, width = 10) {
+	if (!Number.isFinite(value) || !(max > min)) return '-'.repeat(width)
+	const pct = Math.max(0, Math.min(1, (value - min) / (max - min)))
+	const filled = Math.min(width, Math.floor(pct * width))
+	return '.'.repeat(filled) + '|' + '.'.repeat(width - filled)
 }
