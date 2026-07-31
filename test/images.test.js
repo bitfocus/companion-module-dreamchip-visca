@@ -61,27 +61,29 @@ test('encodePng round-trips exact pixel values through zlib deflate/inflate', ()
 	}
 })
 
-test('KNOB_RING_PNG is a 72x72 RGBA PNG: transparent center/corner, a thin low-contrast anti-aliased ring', () => {
+test('KNOB_RING_PNG is a square RGBA PNG: transparent center/corner, a thin low-contrast anti-aliased ring', () => {
 	const buf = Buffer.from(KNOB_RING_PNG, 'base64')
 	const chunks = parseChunks(buf)
 	const ihdr = chunks.find((c) => c.type === 'IHDR').data
-	assert.equal(ihdr.readUInt32BE(0), 72)
-	assert.equal(ihdr.readUInt32BE(4), 72)
+	const width = ihdr.readUInt32BE(0)
+	const height = ihdr.readUInt32BE(4)
+	assert.equal(width, height, 'square canvas')
 
 	const raw = zlib.inflateSync(chunks.find((c) => c.type === 'IDAT').data)
-	const stride = 1 + 72 * 4
+	const stride = 1 + width * 4
 	const alphaAt = (x, y) => raw[y * stride + 1 + x * 4 + 3]
 
-	assert.equal(alphaAt(36, 36), 0, 'center is fully transparent')
+	const center = Math.floor(width / 2)
+	assert.equal(alphaAt(center, center), 0, 'center is fully transparent')
 	assert.equal(alphaAt(0, 0), 0, 'corner is fully transparent')
 
 	// Scan the whole image: the ring should be thin (a small fraction of the
-	// 72x72 canvas), low-contrast (well short of fully opaque), and actually
-	// present (not all-zero).
+	// canvas), low-contrast (well short of fully opaque), and actually
+	// present (not all-zero) -- regardless of the canvas's actual resolution.
 	let maxAlpha = 0
 	let litPixels = 0
-	for (let y = 0; y < 72; y++) {
-		for (let x = 0; x < 72; x++) {
+	for (let y = 0; y < height; y++) {
+		for (let x = 0; x < width; x++) {
 			const a = alphaAt(x, y)
 			if (a > 0) litPixels++
 			if (a > maxAlpha) maxAlpha = a
@@ -89,5 +91,5 @@ test('KNOB_RING_PNG is a 72x72 RGBA PNG: transparent center/corner, a thin low-c
 	}
 	assert.ok(maxAlpha > 0, 'the ring is actually drawn somewhere')
 	assert.ok(maxAlpha < 150, `peak alpha ${maxAlpha} should be low-contrast, not near-opaque`)
-	assert.ok(litPixels > 0 && litPixels < 72 * 72 * 0.25, `ring should be thin, got ${litPixels} lit pixels`)
+	assert.ok(litPixels > 0 && litPixels < width * height * 0.25, `ring should be thin, got ${litPixels} lit pixels`)
 })

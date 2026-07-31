@@ -110,7 +110,7 @@ camera attached.
 | Flip: Flip-V | flip 2 | [ Y] | |
 | Flip: Flip-HV | flip 3 | [ Y] | |
 
-### DCT Gain
+### Exposure
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
@@ -118,7 +118,7 @@ camera attached.
 | Gain Mode: LCG | gain_mode 1 | [ Y] | |
 | Gain Mode: HCG | gain_mode 2 | [ Y] | |
 
-### DCT Black
+### System
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
@@ -127,7 +127,7 @@ camera attached.
 | Black Green | black_green <raw=<value>>  // real range is signed -4096..4095 (ISP_BLS_MIN/MAX); raw is signed -2048..2047, firmware doubles it (x2) | [ Y] | |
 | Black Blue | black_blue <raw=<value>>  // real range is signed -4096..4095 (ISP_BLS_MIN/MAX); raw is signed -2048..2047, firmware doubles it (x2) | [ Y] | |
 
-### DCT Color
+### System
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
@@ -141,7 +141,7 @@ camera attached.
 | PQ Max Brightness | pq_max_brightness <raw=<value>>  // real range is 100-10000 cd/m2 (do_pq_max_brightness); raw is 0-4095, linearly scaled, not a placeholder | [ Y] | |
 | MCC Op-Mode | mcc_opmode <value> | [ Y] | |
 
-### DCT Detail/NR
+### System
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
@@ -156,7 +156,7 @@ camera attached.
 | Filter Detail | filter_detail <raw=<value>>  // real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring | [ Y] | |
 | Filter Denoise | filter_denoise <value> | [ Y] | |
 
-### DCT LUT
+### System
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
@@ -164,7 +164,7 @@ camera attached.
 | LUT Fixed Mode | lut_fixed_mode <value> | [ Y] | |
 | LUT Preset | lut_preset <value> | [ Y] | |
 
-### DCT SDI
+### System
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
@@ -173,7 +173,7 @@ camera attached.
 | SDI Black | sdi_black <raw=<value>>  // real range is signed -60..60; do_sdi_black hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ Y | |
 | SDI White | sdi_white <raw=<value>>  // real range is signed -80..79; do_sdi_white hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ Y] | |
 
-### DCT OSD/Audio
+### System
 
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|

@@ -189,7 +189,7 @@ export const COMMANDS = {
 	cam_settings_reset: { name: 'Settings Reset', group: 'System', kind: 'fixed', bytes: P(0x01, 0x04, 0xa0, 0x10) },
 
 	// Video mode (see SYSTEM dialect caveat)
-	cam_system: { name: 'Video', group: 'Video', kind: 'video' },
+	cam_system: { name: 'Video', group: 'Video Modes', kind: 'video' },
 
 	// Exposure / AEC
 	cam_ae: {
@@ -285,7 +285,7 @@ export const COMMANDS = {
 
 	// Picture
 	cam_gamma: {
-		name: 'Gamma', group: 'Picture', kind: 'enum',
+		name: 'Gamma', group: 'System', kind: 'enum',
 		choices: { 'BT.709': P(0x01, 0x04, 0x5b, 0x00), HLG: P(0x01, 0x04, 0x5b, 0x01), PQ: P(0x01, 0x04, 0x5b, 0x02), 'S-Log3': P(0x01, 0x04, 0x5b, 0x03) },
 	},
 	// post_bright's real range is signed -128..127 (ISP_CPROC_BRIGHTNESS_MIN/MAX
@@ -297,9 +297,9 @@ export const COMMANDS = {
 	// function (0xA1) that lands on this exact same post_bright command --
 	// the firmware still answers it for other controllers, but it's a pure
 	// duplicate of cam_bright_direct so it's deliberately not exposed here.)
-	cam_bright: { name: 'Bright', group: 'Picture', kind: 'rud', func: 0x0d },
-	cam_bright_direct: { name: 'Bright (direct)', group: 'Picture', kind: 'direct', prefix: P(0x01, 0x04, 0x0d, 0x00, 0x00), nibbles: 2, signed: true },
-	cam_contrast_direct: { name: 'Contrast (direct)', group: 'Picture', kind: 'direct', prefix: P(0x01, 0x04, 0xa2, 0x00, 0x00), nibbles: 2 },
+	cam_bright: { name: 'Bright', group: 'System', kind: 'rud', func: 0x0d },
+	cam_bright_direct: { name: 'Bright (direct)', group: 'System', kind: 'direct', prefix: P(0x01, 0x04, 0x0d, 0x00, 0x00), nibbles: 2, signed: true },
+	cam_contrast_direct: { name: 'Contrast (direct)', group: 'System', kind: 'direct', prefix: P(0x01, 0x04, 0xa2, 0x00, 0x00), nibbles: 2 },
 	// The standard VISCA set also defines cam_lr_reverse (func 0x61) and
 	// cam_picture_flip (func 0x66) -- independent On/Off toggles of just the
 	// horizontal or vertical bit of this same `flip` value via read-modify-
@@ -307,7 +307,7 @@ export const COMMANDS = {
 	// cam_flip's 4-state direct select already reaches every combination in
 	// one command, so they're deliberately not exposed here.
 	cam_flip: {
-		name: 'Flip', group: 'Picture', kind: 'enum',
+		name: 'Flip', group: 'System', kind: 'enum',
 		choices: { Off: P(0x01, 0x04, 0xa4, 0x00), 'Flip-H': P(0x01, 0x04, 0xa4, 0x01), 'Flip-V': P(0x01, 0x04, 0xa4, 0x02), 'Flip-HV': P(0x01, 0x04, 0xa4, 0x03) },
 	},
 
@@ -329,20 +329,20 @@ export const COMMANDS = {
 	// gain_green's real range is 0-4095 (ISP_AWB_GAIN_MAX); widened to 3 nibbles.
 	dct_ggain_direct: { name: 'Green Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x01, 0x00, 0x00), nibbles: 3 },
 	dct_gain_mode: {
-		name: 'Gain Mode', group: 'DCT Gain', kind: 'enum',
+		name: 'Gain Mode', group: 'Exposure', kind: 'enum',
 		choices: { Auto: P(0x01, 0x7e, 0x01, 0x02, 0x00), LCG: P(0x01, 0x7e, 0x01, 0x02, 0x01), HCG: P(0x01, 0x7e, 0x01, 0x02, 0x02) },
 	},
 
 	// black_master's real range is signed -2048..2047 (ISP_BMST_OFFSET_MIN/MAX,
 	// a signed 12-bit value); widened to 3 nibbles to represent it exactly.
-	dct_black_master: { name: 'Black Master', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x03), nibbles: 3, signed: true },
+	dct_black_master: { name: 'Black Master', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x03), nibbles: 3, signed: true },
 	// black_red/green/blue's real range is signed -4096..4095 (ISP_BLS_MIN/MAX);
 	// kept at 3 nibbles (signed 12-bit, -2048..2047) with firmware scaling by 2
 	// to cover -4096..4094 -- odd values and 4095 itself are unreachable, an
 	// accepted precision tradeoff.
-	dct_black_red: { name: 'Black Red', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x04), nibbles: 3, signed: true },
-	dct_black_green: { name: 'Black Green', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x05), nibbles: 3, signed: true },
-	dct_black_blue: { name: 'Black Blue', group: 'DCT Black', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x06), nibbles: 3, signed: true },
+	dct_black_red: { name: 'Black Red', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x04), nibbles: 3, signed: true },
+	dct_black_green: { name: 'Black Green', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x05), nibbles: 3, signed: true },
+	dct_black_blue: { name: 'Black Blue', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x06), nibbles: 3, signed: true },
 
 	// Flare's real signature is "flare <red> <green> <blue>" -- positional,
 	// all 3 needed on every set (do_flare has no single-channel form).
@@ -351,74 +351,74 @@ export const COMMANDS = {
 	// the one channel below, and reissues the full command. Real range per
 	// channel is 0-65535 (ISP_BLS_FLARE_MIN/MAX); raw is 0-4095, firmware
 	// multiplies it by 16 (same x16 scale as audio_gain).
-	dct_flare_red: { name: 'Flare Red', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x07), nibbles: 3 },
-	dct_flare_green: { name: 'Flare Green', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1b), nibbles: 3 },
-	dct_flare_blue: { name: 'Flare Blue', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1c), nibbles: 3 },
+	dct_flare_red: { name: 'Flare Red', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x07), nibbles: 3 },
+	dct_flare_green: { name: 'Flare Green', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1b), nibbles: 3 },
+	dct_flare_blue: { name: 'Flare Blue', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1c), nibbles: 3 },
 	// awb_speed's real range is 0-2 (do_awb_speed hard-rejects >2 with
 	// -EINVAL); `max` narrows the Companion-side UI/knob range to what's
 	// actually valid instead of the wire's full 1-nibble 0-15 capacity.
-	dct_awb_speed: { name: 'AWB Speed', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x08), nibbles: 1, min: 0, max: 2 },
+	dct_awb_speed: { name: 'AWB Speed', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x08), nibbles: 1, min: 0, max: 2 },
 	// slog3_master_gain's real range is signed -6..12 dB (system_settings.h;
 	// do_slog3_master_gain hard-rejects outside that with -EINVAL). Signed to
 	// match the BSP's bespoke two's-complement handling (it's no longer a
 	// generic unsigned DCT_VALUE passthrough); `min`/`max` narrow the
 	// Companion-side UI/knob range from the wire's full signed -128..127.
-	dct_slog3_gain: { name: 'S-Log3 Master Gain', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x09), nibbles: 2, signed: true, min: -6, max: 12 },
+	dct_slog3_gain: { name: 'S-Log3 Master Gain', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x09), nibbles: 2, signed: true, min: -6, max: 12 },
 	// color_space's real range is 0-2 (COLOR_SPACE_REC709/REC2020/
 	// S_GAMUT3_CINE, isp_drv.h; do_color_space hard-rejects outside 0-2 with
 	// -EOPNOTSUPP); `max` narrows the Companion-side UI/knob range from the
 	// wire's full 1-nibble 0-15 capacity.
-	dct_color_space: { name: 'Color Space', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x17), nibbles: 1, min: 0, max: 2 },
+	dct_color_space: { name: 'Color Space', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x17), nibbles: 1, min: 0, max: 2 },
 	// dct_tm_mode (tm_mode, SS 0x21) is intentionally NOT exposed: do_tm_mode's
 	// own "off" (0) path is marked "a hack to have something for the NAB"
 	// (product/src/cmd_tm.c) and does not reliably disable tone mapping on
 	// real hardware -- see TODO.md.
 	// pq_max_brightness's real range is 100-10000 cd/m2 (do_pq_max_brightness);
 	// widened to 3 nibbles (0-4095) for ~2.4 cd/m2 per step, matching the BSP.
-	dct_pq_max_bright: { name: 'PQ Max Brightness', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x22), nibbles: 3 },
-	dct_mcc_opmode: { name: 'MCC Op-Mode', group: 'DCT Color', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x40), nibbles: 1 },
+	dct_pq_max_bright: { name: 'PQ Max Brightness', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x22), nibbles: 3 },
+	dct_mcc_opmode: { name: 'MCC Op-Mode', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x40), nibbles: 1 },
 
-	dct_cnr_auto: { name: 'CNR Auto', group: 'DCT Detail/NR', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x11, 0x00), On: P(0x01, 0x7e, 0x01, 0x11, 0x01) } },
-	dct_cnr_mode: { name: 'CNR Mode', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x10), nibbles: 1 },
-	dct_dpf_enable: { name: 'DPF Enable', group: 'DCT Detail/NR', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x12, 0x00), On: P(0x01, 0x7e, 0x01, 0x12, 0x01) } },
-	dct_dpf_strength: { name: 'DPF Strength', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x13), nibbles: 1 },
-	dct_filter_enable: { name: 'Filter Enable', group: 'DCT Detail/NR', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x14, 0x00), On: P(0x01, 0x7e, 0x01, 0x14, 0x01) } },
+	dct_cnr_auto: { name: 'CNR Auto', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x11, 0x00), On: P(0x01, 0x7e, 0x01, 0x11, 0x01) } },
+	dct_cnr_mode: { name: 'CNR Mode', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x10), nibbles: 1 },
+	dct_dpf_enable: { name: 'DPF Enable', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x12, 0x00), On: P(0x01, 0x7e, 0x01, 0x12, 0x01) } },
+	dct_dpf_strength: { name: 'DPF Strength', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x13), nibbles: 1 },
+	dct_filter_enable: { name: 'Filter Enable', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x14, 0x00), On: P(0x01, 0x7e, 0x01, 0x14, 0x01) } },
 	// real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL, firmware hard-rejects >=32);
 	// wire stays 2 nibbles (0-255, same as filter_denoise's real 0-255), but
 	// firmware now clamps raw values above 31 to 31 instead of erroring. `max`
 	// narrows the Companion-side UI/knob range to what's actually usable,
 	// instead of letting the wire's full 0-255 capacity leak through.
-	dct_filter_detail: { name: 'Filter Detail', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x15), nibbles: 2, max: 31 },
+	dct_filter_detail: { name: 'Filter Detail', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x15), nibbles: 2, max: 31 },
 	// real range is 0-255 (ISP_FLT_MAX_DENOISE_LVL); 1 nibble truncated it,
 	// widened to 2 nibbles to match it exactly.
-	dct_filter_denoise: { name: 'Filter Denoise', group: 'DCT Detail/NR', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x16), nibbles: 2 },
+	dct_filter_denoise: { name: 'Filter Denoise', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x16), nibbles: 2 },
 
 	// lut_mode's real settable range is 0-1 (LUT_MODE_INTERPOLATE/FAST_GAMMA,
 	// lut_drv.h); LUT_MODE_FIXED=2 exists in the enum but do_lut_mode
 	// explicitly rejects it with -EINVAL ("used only internally"). `max`
 	// narrows the Companion-side UI/knob range from the wire's full 0-15.
-	dct_lut_mode: { name: 'LUT Mode', group: 'DCT LUT', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x24), nibbles: 1, min: 0, max: 1 },
-	dct_lut_fixed_mode: { name: 'LUT Fixed Mode', group: 'DCT LUT', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x25), nibbles: 1 },
-	dct_lut_preset: { name: 'LUT Preset', group: 'DCT LUT', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x26), nibbles: 1 },
+	dct_lut_mode: { name: 'LUT Mode', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x24), nibbles: 1, min: 0, max: 1 },
+	dct_lut_fixed_mode: { name: 'LUT Fixed Mode', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x25), nibbles: 1 },
+	dct_lut_preset: { name: 'LUT Preset', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x26), nibbles: 1 },
 
 	// do_sdi_range's own help text: "<flag> - set sdi range [0: legal, 1: full range]"
-	dct_sdi_range: { name: 'SDI Range', group: 'DCT SDI', kind: 'enum', choices: { Legal: P(0x01, 0x7e, 0x01, 0x30, 0x00), Full: P(0x01, 0x7e, 0x01, 0x30, 0x01) } },
+	dct_sdi_range: { name: 'SDI Range', group: 'System', kind: 'enum', choices: { Legal: P(0x01, 0x7e, 0x01, 0x30, 0x00), Full: P(0x01, 0x7e, 0x01, 0x30, 0x01) } },
 	// sdi_black's real range is signed -60..60 (do_sdi_black hard-rejects
 	// outside that with -EINVAL). Signed to match the BSP's bespoke two's-
 	// complement handling (it's no longer a generic unsigned DCT_VALUE
 	// passthrough, same fix as dct_slog3_gain); `min`/`max` narrow the
 	// Companion-side UI/knob range from the wire's full signed -128..127.
-	dct_sdi_black: { name: 'SDI Black', group: 'DCT SDI', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x31), nibbles: 2, signed: true, min: -60, max: 60 },
+	dct_sdi_black: { name: 'SDI Black', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x31), nibbles: 2, signed: true, min: -60, max: 60 },
 	// sdi_white's real range is signed -80..79 (do_sdi_white hard-rejects
 	// outside that with -EINVAL); same treatment as sdi_black above.
-	dct_sdi_white: { name: 'SDI White', group: 'DCT SDI', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x32), nibbles: 2, signed: true, min: -80, max: 79 },
+	dct_sdi_white: { name: 'SDI White', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x32), nibbles: 2, signed: true, min: -80, max: 79 },
 
-	dct_osd: { name: 'OSD', group: 'DCT OSD/Audio', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x52, 0x00), On: P(0x01, 0x7e, 0x01, 0x52, 0x01) } },
-	dct_audio_enable: { name: 'Audio Enable', group: 'DCT OSD/Audio', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x65, 0x00), On: P(0x01, 0x7e, 0x01, 0x65, 0x01) } },
+	dct_osd: { name: 'OSD', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x52, 0x00), On: P(0x01, 0x7e, 0x01, 0x52, 0x01) } },
+	dct_audio_enable: { name: 'Audio Enable', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x65, 0x00), On: P(0x01, 0x7e, 0x01, 0x65, 0x01) } },
 	// audio_gain's real range is 0-65535 (4.12 fixed-point, 4096 = 1.0x unity
 	// gain); kept at 3 nibbles (0-4095) with firmware scaling by 16 to cover
 	// 0-65520 -- the top 15 values are unreachable, an accepted tradeoff.
-	dct_audio_gain: { name: 'Audio Gain', group: 'DCT OSD/Audio', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x66), nibbles: 3 },
+	dct_audio_gain: { name: 'Audio Gain', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x66), nibbles: 3 },
 
 	// --- AEC (auto exposure control) individual fields ------------------------
 	// aec's real signature is "aec <enable> <setPoint> <speed> <clmTolerance>

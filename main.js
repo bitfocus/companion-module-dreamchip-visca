@@ -304,7 +304,7 @@ class DctViscaInstance extends InstanceBase {
 			const step = p.max <= 15 ? 1 : this.knobStep()
 			presets[`knob_${p.id}`] = {
 				type: 'button',
-				category: `Knobs: ${p.group}`,
+				category: `${p.group}`,
 				name: `${p.name} (knob)`,
 				options: { rotaryActions: true },
 				style: { text: p.name, size: 'auto', color: WHITE, bgcolor: BLUE, png64: KNOB_RING_PNG },

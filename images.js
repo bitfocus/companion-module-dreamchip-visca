@@ -73,9 +73,16 @@ export function encodePng(width, height, getPixel) {
 // looks thick and jagged at small stroke widths; fading alpha linearly
 // across the stroke's half-width instead gives a thin, smooth line at any
 // stroke setting.
-const KNOB_RING_SIZE = 72 // Companion's standard custom-image button size
-const KNOB_RING_RADIUS = 30
-const KNOB_RING_STROKE = 1.5
+//
+// Rendered at a higher resolution than Companion's actual button size
+// (72x72) for a crisper downscaled result; radius/stroke are scaled up from
+// the original 72px design (radius 30, stroke 1.5) by the same factor as
+// the canvas, so the proportions -- and the ring's on-button appearance --
+// stay identical, just sharper.
+const KNOB_RING_SIZE = 200
+const KNOB_RING_SCALE = KNOB_RING_SIZE / 72
+const KNOB_RING_RADIUS = 30 * KNOB_RING_SCALE
+const KNOB_RING_STROKE = 1.5 * KNOB_RING_SCALE
 const KNOB_RING_ALPHA = 90 // out of 255 -- subtle, not stark against the blue background
 function knobRingPixel(x, y) {
 	const center = KNOB_RING_SIZE / 2
