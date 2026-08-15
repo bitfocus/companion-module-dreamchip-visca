@@ -7,6 +7,28 @@ const GREEN = combineRgb(0, 102, 0)
 const BLUE = combineRgb(0, 51, 102)
 const WHITE = combineRgb(255, 255, 255)
 
+// `cam_settings_reset`/`dct_load_settings` change most camera parameters at
+// once as a side effect of one command; without a follow-up poll, every
+// displayed variable/feedback keeps showing its pre-reset value until the
+// next manual "Poll inquiries now" or the (off-by-default) poll interval
+// fires. pollOnce()'s inquiries get enqueued right behind the reset frame in
+// the same send queue (see pump()), so they naturally wait for the reset's
+// own reply first -- no artificial delay needed.
+const REFRESH_AFTER_IDS = new Set(['cam_settings_reset', 'dct_load_settings'])
+
+// FN_CAM_COLOR_TEMP's inquiry side (INQUIRIES.color_temp) has no case in the
+// BSP's wb_inquiry() -- there is no ProVideo command that reports which
+// wb_preset index is currently active, only ones that set it -- so it always
+// errors. Left in INQUIRIES so the variable/Companion definition still
+// exists (setupVariables() derives its list from INQUIRIES), but excluded
+// from actual polling: sending it every cycle would be a wasted round trip
+// AND would keep stomping the optimistic value set below back to 'n/a'.
+const NO_POLL_INQUIRY_IDS = new Set(['color_temp'])
+// color_temp_direct (COMMANDS id) is the SET-only counterpart -- since it can
+// never be confirmed via inquiry, reflect the just-sent value immediately
+// instead of leaving its variable stuck at 'n/a' forever.
+const OPTIMISTIC_DIRECT_IDS = new Set(['color_temp_direct'])
+
 class DctViscaInstance extends InstanceBase {
 	async init(config) {
 		this.config = config
@@ -224,9 +246,20 @@ class DctViscaInstance extends InstanceBase {
 				const min = c.min ?? (c.signed ? -(1 << (bits - 1)) : 0)
 				const mask = (1 << bits) - 1
 				a.options = [{ type: 'number', id: 'value', label: `Value (${min}-${max})`, default: min, min, max }]
-				a.callback = (ev) => this.send([...c.prefix, ...encodeNibbles(Number(ev.options.value) & mask, c.nibbles)])
+				a.callback = (ev) => {
+					const value = Number(ev.options.value) & mask
+					this.send([...c.prefix, ...encodeNibbles(value, c.nibbles)])
+					if (OPTIMISTIC_DIRECT_IDS.has(id)) {
+						const varId = this.paramById[id].varId
+						this.state[varId] = String(value)
+						this.setVariableValues({ [varId]: String(value) })
+					}
+				}
 			} else if (c.kind === 'fixed') {
-				a.callback = () => this.send(c.bytes)
+				a.callback = () => {
+					this.send(c.bytes)
+					if (REFRESH_AFTER_IDS.has(id)) this.pollOnce()
+				}
 			} else if (c.kind === 'video') {
 				const modes = Object.keys(SYSTEM)
 				a.options = [{ type: 'dropdown', id: 'mode', label: 'Video mode', default: modes[0], choices: modes.map((m) => ({ id: m, label: SYSTEM_NAMES[m] ?? `Mode ${m}` })) }]
@@ -377,8 +410,34 @@ class DctViscaInstance extends InstanceBase {
 
 	pollOnce() {
 		if (!this.socket?.isConnected) return
+		// All ~55 INQUIRIES share the one serial send queue (enqueue()/pump()),
+		// which only ever has one command in flight -- so a full cycle can take
+		// far longer than a short poll interval. Without this guard, an
+		// interval timer firing again before the previous cycle's replies are
+		// all back just piles another 55 frames onto an ever-growing backlog,
+		// starving out any button-press action queued behind it (this is what
+		// "flooding" at low poll intervals actually was). Skip this tick
+		// entirely if the last cycle hasn't finished draining yet.
+		if (this.pollBusy) return
+		const entries = Object.entries(INQUIRIES)
+			.filter(([id]) => !NO_POLL_INQUIRY_IDS.has(id))
+			.map(([, q]) => q)
+		if (!entries.length) return
+		this.pollBusy = true
+		let remaining = entries.length
+		let finished = false
+		// Safety net: pump()'s own per-command timeout (main.js) silently frees
+		// a stalled slot without ever calling onReply, so a single non-replying
+		// inquiry would otherwise leave pollBusy stuck forever.
+		const finish = () => {
+			if (finished) return
+			finished = true
+			this.pollBusy = false
+			clearTimeout(safety)
+		}
+		const safety = setTimeout(finish, entries.length * 1600)
 		const addr = this.config?.address || 1
-		for (const q of Object.values(INQUIRIES)) {
+		for (const q of entries) {
 			this.enqueue(buildFrame(addr, q.payload), (reply, kind) => {
 				let value = 'n/a'
 				if (kind === 0x50) value = decodeReply(q.decode, reply.subarray(2, reply.length - 1))
@@ -392,6 +451,7 @@ class DctViscaInstance extends InstanceBase {
 				if (q.varId === 'ae_mode') this.checkFeedbacks('ae_mode_is')
 				if (q.varId === 'wb_mode') this.checkFeedbacks('wb_mode_is')
 				this.checkFeedbacks('knob_value')
+				if (--remaining <= 0) finish()
 			})
 		}
 	}
@@ -412,8 +472,22 @@ class DctViscaInstance extends InstanceBase {
 	}
 
 	async configUpdated(config) {
+		const prev = this.config
 		this.config = config
-		await this.initTransport()
+		// Only tear down/rebuild the actual connection if a connection-relevant
+		// field changed. Reopening a serial port immediately after closing it
+		// is racy (the OS may not have released the device yet), which used to
+		// silently leave the module disconnected -- and therefore pollOnce()
+		// permanently no-op'ing -- after changing something as unrelated as
+		// Poll ms, until a full disable/enable gave it enough time to recover.
+		const transportChanged =
+			!prev ||
+			prev.conn !== config.conn ||
+			prev.host !== config.host ||
+			prev.port !== config.port ||
+			prev.serialPort !== config.serialPort ||
+			prev.baud !== config.baud
+		if (transportChanged) await this.initTransport()
 		this.startPolling()
 	}
 

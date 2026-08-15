@@ -183,7 +183,7 @@ const SHUTTER_SPOT_CHECK = [8000, 500, 30]
 // Destructive/risky on real hardware: writes EEPROM, reloads persisted
 // settings, or (video mode) disrupts a live signal. Skipped unless
 // --include-destructive.
-const DESTRUCTIVE_IDS = new Set(['cam_settings_save', 'cam_settings_reset', 'dct_load_settings', 'cam_memory', 'cam_system'])
+const DESTRUCTIVE_IDS = new Set(['cam_settings_save', 'cam_settings_reset', 'dct_load_settings', 'cam_system'])
 
 // Always skipped, regardless of --include-destructive: not destructive, just
 // not wanted in this run (toggling OSD on/off is visually disruptive to

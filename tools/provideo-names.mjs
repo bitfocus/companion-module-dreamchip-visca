@@ -124,10 +124,6 @@ export const PROVIDEO_NAMES = {
 	},
 	flicker: { cmd: 'aec', scaled: false, note: "reads aec's taf field: 8333 -> 60Hz, anything else (including the un-set-able Off) normalizes to 50Hz" },
 
-	// --- not handled by any visca_map_*.c in the current firmware -----------
-	// (present as a Companion command/inquiry, but no dispatcher recognizes
-	// the function code yet — the camera will reply 0x60/0x41.)
-	cam_memory: { cmd: null, note: 'not implemented in current firmware (func 0x3F unhandled)' },
 	cam_settings_save: { cmd: 'save_settings', scaled: false },
 	cam_settings_reset: { cmd: 'reset_settings', scaled: false },
 	// SET works (raw wb_preset index passthrough -- no ProVideo command

@@ -18,7 +18,7 @@ finished, turns AEC/AWB back on and calls `reset_settings`. Run it with:
 VISCA_TEST_PORT=/dev/ttyUSB0 npm run test:hardware
 ```
 
-Destructive commands (Settings Save/Reset, Memory) are skipped *as test
+Destructive commands (Settings Save/Reset) are skipped *as test
 cases* by default -- pass `--include-destructive` to include them. Settings
 Reset is still always run once at the very end regardless, as the cleanup
 step described above. `OSD` is always skipped (visually disruptive to
@@ -32,11 +32,8 @@ camera attached.
 | Companion Action | ProVideo Command | Tested | Comments |
 |---|---|---|---|
 | IF Clear | protocol IF_Clear ack only, not a ProVideo command | [N] | |
-| Settings Save | not implemented in current firmware (func 0xA5 unhandled) | [N] | |
+| Settings Save | save_settings | [ ] | |
 | Settings Reset | reset_settings | [Y] | |
-| Memory: Reset | not implemented in current firmware (func 0x3F unhandled) | [N] | |
-| Memory: Set | not implemented in current firmware (func 0x3F unhandled) | [N] | |
-| Memory: Recall | not implemented in current firmware (func 0x3F unhandled) | [N] | |
 
 ### Video
 

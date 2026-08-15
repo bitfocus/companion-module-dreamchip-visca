@@ -311,12 +311,6 @@ export const COMMANDS = {
 		choices: { Off: P(0x01, 0x04, 0xa4, 0x00), 'Flip-H': P(0x01, 0x04, 0xa4, 0x01), 'Flip-V': P(0x01, 0x04, 0xa4, 0x02), 'Flip-HV': P(0x01, 0x04, 0xa4, 0x03) },
 	},
 
-	// Memory
-	cam_memory: {
-		name: 'Memory', group: 'System', kind: 'enum',
-		choices: { Reset: P(0x01, 0x04, 0x3f, 0x00, 0x00), Set: P(0x01, 0x04, 0x3f, 0x01, 0x00), Recall: P(0x01, 0x04, 0x3f, 0x02, 0x00) },
-	},
-
 	// --- DCT vendor extensions (category 0x7E, sub 0x01) ---------------------
 	// Payloads are `01 7E 01 SS ...` (Dream Chip vendor extensions).
 	// Grouped with White Balance (not DCT Gain) to match cam_rgain/cam_bgain --
