@@ -127,8 +127,8 @@ async function inquire(inquiryId) {
 // only). `'ERROR'` means this choice is a known-unimplemented VISCA path and
 // should fail with VISCA_ERR_NOT_EXECUTABLE (0x41) -- a regression check.
 const LOSSY_ENUM_EXPECT = {
-	cam_ae: { 'Full Auto': 'FullAuto', Manual: 'Manual', 'Shutter Pri': 'FullAuto' },
-	cam_wb: { Auto: 'Auto', Indoor: null, Outdoor: null, Manual: 'Manual', 'Color Temp': 'ERROR', Trigger: null },
+	cam_ae: { Auto: 'FullAuto', Manual: 'Manual', 'Shutter Pri': 'FullAuto' },
+	cam_wb: { Auto: 'Auto', Indoor: null, Outdoor: null, Manual: 'Manual', Trigger: null },
 	cam_flicker: { Off: '50Hz', '50Hz': '50Hz', '60Hz': '60Hz' },
 }
 
@@ -185,11 +185,6 @@ const SHUTTER_SPOT_CHECK = [8000, 500, 30]
 // --include-destructive.
 const DESTRUCTIVE_IDS = new Set(['cam_settings_save', 'cam_settings_reset', 'dct_load_settings', 'cam_system'])
 
-// Always skipped, regardless of --include-destructive: not destructive, just
-// not wanted in this run (toggling OSD on/off is visually disruptive to
-// anyone monitoring the feed).
-const EXCLUDED_IDS = new Set(['dct_osd'])
-
 // varId derivation for `direct` commands (mirrors continuousParams()' own rule).
 function directVarId(id) {
 	const base = id.endsWith('_direct') ? id.slice(0, -'_direct'.length) : id
@@ -202,7 +197,7 @@ function pickTestValue(min, max) {
 	return min + Math.floor((max - min) * 0.25)
 }
 
-// cam_ae's "Full Auto"/"Shutter Pri" choices re-enable AEC (aec 1), and
+// cam_ae's "Auto"/"Shutter Pri" choices re-enable AEC (aec 1), and
 // cam_wb's "Auto" choice re-enables AWB (awb 1) -- both must run AFTER every
 // other test case, or they'd silently undo withAutoModesDisabled() partway
 // through the run and break every subsequent manual gain/exposure/WB-gain
@@ -220,7 +215,6 @@ function buildCases() {
 	const deferred = []
 	for (const [id, c] of Object.entries(COMMANDS)) {
 		if (!includeDestructive && DESTRUCTIVE_IDS.has(id)) continue
-		if (EXCLUDED_IDS.has(id)) continue
 		if (c.kind === 'video') continue // disrupts a live signal; not covered here
 		if (groupFilter && c.group !== groupFilter) continue
 		if (onlyFilter && !id.includes(onlyFilter) && !c.name.includes(onlyFilter)) continue
@@ -306,7 +300,6 @@ const ENUM_VERIFY_MAP = {
 	dct_dpf_enable: 'dct_dpf_enable',
 	dct_filter_enable: 'dct_filter_enable',
 	dct_sdi_range: 'dct_sdi_range',
-	dct_osd: 'dct_osd',
 	dct_audio_enable: 'dct_audio_enable',
 	dct_auto_save: 'dct_auto_save',
 	dct_timecode_hold: 'dct_timecode_hold',
@@ -430,7 +423,7 @@ async function withAutoModesDisabled(fn) {
 		await fn()
 	} finally {
 		console.log('\nTurning AEC/AWB back on and resetting settings...')
-		await setCommand(COMMANDS.cam_ae.choices['Full Auto'])
+		await setCommand(COMMANDS.cam_ae.choices['Auto'])
 		await setCommand(COMMANDS.cam_wb.choices['Auto'])
 		const reset = await setCommand(COMMANDS.cam_settings_reset.bytes)
 		console.log(reset.ok ? 'reset_settings: ok' : `reset_settings: ${describeFailure(reset)}`)

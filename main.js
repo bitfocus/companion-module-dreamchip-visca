@@ -5,7 +5,57 @@ import { KNOB_RING_PNG } from './images.js'
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
 const GREEN = combineRgb(0, 102, 0)
 const BLUE = combineRgb(0, 51, 102)
+const ORANGE = combineRgb(255, 102, 0)
+const DIM_RED = combineRgb(102, 0, 0)
+const DIM_GREEN = combineRgb(0, 102, 0)
+const DIM_BLUE = combineRgb(0, 0, 102)
+const DARK_GRAY = combineRgb(51, 51, 51)
+const LIGHT_GRAY = combineRgb(153, 153, 153)
+const DARK_CYAN = combineRgb(0, 102, 102)
+const LIGHT_CYAN = combineRgb(0, 204, 204)
+const LIGHT_BLUE = combineRgb(51, 153, 255)
 const WHITE = combineRgb(255, 255, 255)
+
+// Per-preset background overrides, applied after generation (default is BLUE
+// from the shared btn() helper). Orange calls out the 3 "hands control back
+// to the camera's auto algorithms / wipes settings" buttons; dim red/green/
+// blue color-codes the R/G/B gain reset buttons and their knob presets to
+// match the channel they act on.
+const PRESET_BGCOLOR_OVERRIDES = {
+	cam_settings_reset: ORANGE,
+	cam_wb_Auto: ORANGE,
+	cam_ae_Auto: ORANGE,
+	cam_rgain_reset: DIM_RED,
+	cam_bgain_reset: DIM_BLUE,
+	dct_ggain_Reset: DIM_GREEN,
+	knob_cam_rgain_direct: DIM_RED,
+	knob_cam_bgain_direct: DIM_BLUE,
+	knob_dct_ggain_direct: DIM_GREEN,
+	knob_dct_black_red: DIM_RED,
+	knob_dct_black_blue: DIM_BLUE,
+	knob_dct_black_green: DIM_GREEN,
+	knob_dct_flare_red: DIM_RED,
+	knob_dct_flare_blue: DIM_BLUE,
+	knob_dct_flare_green: DIM_GREEN,
+	cam_settings_save: DARK_GRAY,
+	dct_load_settings: DARK_GRAY,
+	if_clear: DARK_GRAY,
+	dct_timecode_hold_Run: DARK_GRAY,
+	dct_timecode_hold_Hold: DARK_GRAY,
+	dct_auto_save_On: DARK_GRAY,
+	dct_auto_save_Off: DARK_GRAY,
+	dct_audio_enable_On: DARK_CYAN,
+	dct_audio_enable_Off: DARK_CYAN,
+	knob_dct_audio_gain: DARK_CYAN,
+}
+
+// `kind: 'rud'` COMMANDS ids -> their real-value INQUIRIES id. Reset/Up/Down
+// compute the new value server-side (relative step or a fixed target), and
+// the only way to learn what it actually landed on is to ask -- these ids
+// don't line up 1:1 with COMMANDS (e.g. cam_gain -> INQUIRIES.gain), same
+// irregularity continuousParams()/directVarId() already work around for the
+// "direct" counterparts.
+const RUD_INQUIRY_ID = { cam_gain: 'gain', cam_shutter: 'shutter', cam_rgain: 'rgain', cam_bgain: 'bgain', cam_bright: 'bright' }
 
 // `cam_settings_reset`/`dct_load_settings` change most camera parameters at
 // once as a side effect of one command; without a follow-up poll, every
@@ -201,6 +251,33 @@ class DctViscaInstance extends InstanceBase {
 		this.enqueue(buildFrame(this.config?.address || 1, payload))
 	}
 
+	// Decode a single inquiry's reply and push it into state/variable/knob/
+	// feedbacks -- shared by pollOnce()'s batch loop and any one-off inquiry
+	// (e.g. a RUD action confirming its new value, or a manual "measure now").
+	applyInquiryReply(q, reply, kind) {
+		const value = kind === 0x50 ? decodeReply(q.decode, reply.subarray(2, reply.length - 1)) : 'n/a'
+		this.state[q.varId] = value
+		this.setVariableValues({ [q.varId]: value })
+		if (q.decode.type === 'value') {
+			const n = parseInt(value, 10)
+			if (Number.isFinite(n)) this.knob[q.varId] = n
+		}
+		if (q.varId === 'ae_mode') this.checkFeedbacks('ae_mode_is')
+		if (q.varId === 'wb_mode') this.checkFeedbacks('wb_mode_is')
+		if (q.varId === 'dct_audio_enable') this.checkFeedbacks('dct_audio_enable_is', 'dct_audio_enable_display')
+		if (q.varId === 'dct_sdi_range') this.checkFeedbacks('dct_sdi_range_is', 'dct_sdi_range_display')
+		if (q.varId === 'dct_timecode_hold') this.checkFeedbacks('dct_timecode_hold_display')
+		this.checkFeedbacks('knob_value')
+		this.checkFeedbacks('wb_measure_display')
+	}
+
+	// Fire a single named inquiry (INQUIRIES key) on demand.
+	inquireOnce(qId) {
+		const q = INQUIRIES[qId]
+		if (!q) return
+		this.enqueue(buildFrame(this.config?.address || 1, q.payload), (reply, kind) => this.applyInquiryReply(q, reply, kind))
+	}
+
 	// --- knobs (relative adjust of continuous params) ----------------------
 	knobStep() {
 		const n = Number(this.config?.knobStep)
@@ -218,7 +295,26 @@ class DctViscaInstance extends InstanceBase {
 	adjustParam(paramId, delta) {
 		const p = this.paramById?.[paramId]
 		if (!p || !Number.isFinite(delta)) return
-		const next = Math.max(p.min, Math.min(p.max, this.readValue(p.varId) + delta))
+		const cur = this.readValue(p.varId)
+		let raw
+		if (p.logScale) {
+			// Multiplicative step (delta's sign only -- its magnitude is the
+			// linear "step" config, which doesn't apply here) so each turn is a
+			// constant *percentage* change, matching how audio level/dB works,
+			// instead of a constant raw amount that's huge at the low end of the
+			// range and imperceptible at the high end.
+			const factor = 1 + (p.stepPercent ?? 5) / 100
+			if (delta >= 0) {
+				raw = Math.round(Math.max(cur, 1) * factor)
+				if (raw <= cur) raw = cur + 1 // guarantee progress escaping 0
+			} else {
+				raw = Math.round(cur / factor)
+				if (raw >= cur) raw = Math.max(0, cur - 1) // guarantee progress down to 0
+			}
+		} else {
+			raw = cur + delta
+		}
+		const next = Math.max(p.min, Math.min(p.max, raw))
 		this.knob[p.varId] = next
 		const c = COMMANDS[p.cmd]
 		this.send([...c.prefix, ...encodeNibbles(next, c.nibbles)])
@@ -239,7 +335,14 @@ class DctViscaInstance extends InstanceBase {
 			} else if (c.kind === 'rud') {
 				const rudChoices = c.rudChoices ?? Object.keys(RUD)
 				a.options = [{ type: 'dropdown', id: 'choice', label: 'Action', default: rudChoices[0], choices: rudChoices.map((x) => ({ id: x, label: x })) }]
-				a.callback = (ev) => this.send([0x01, 0x04, c.func, RUD[ev.options.choice]])
+				a.callback = (ev) => {
+					this.send([0x01, 0x04, c.func, RUD[ev.options.choice]])
+					// Reset/Up/Down all change the real value server-side without
+					// telling us what it landed on -- re-read it immediately so the
+					// knob display/variable don't sit stale until the next poll.
+					const qId = RUD_INQUIRY_ID[id]
+					if (qId) this.inquireOnce(qId)
+				}
 			} else if (c.kind === 'direct') {
 				const bits = 4 * c.nibbles
 				const max = c.max ?? (c.signed ? (1 << (bits - 1)) - 1 : (1 << bits) - 1)
@@ -292,19 +395,65 @@ class DctViscaInstance extends InstanceBase {
 			callback: (ev) => this.adjustParam(ev.options.param, Number(ev.options.step)),
 		}
 		actions['poll_now'] = { name: 'System: Poll inquiries now', options: [], callback: () => this.pollOnce() }
+		// wb_temp_measure has no SET side (it's a live, continuously-updated
+		// AWB filter reading, not something you configure) -- so it has no
+		// COMMANDS entry and is invisible to the generic loop above. Fire just
+		// this one inquiry on demand, same shape as poll_now but scoped to it.
+		actions['dct_wb_temp_measure_now'] = {
+			name: 'White Balance: Measure Kelvin now',
+			options: [],
+			callback: () => this.inquireOnce('dct_wb_temp_measure'),
+		}
+		// Genuinely binary commands (unlike cam_ae/cam_wb's 3-6 choices) --
+		// toggle unambiguously flips to whichever of the 2 choices isn't
+		// current, writing state immediately so the button's own feedback
+		// doesn't wait for a poll.
+		actions['dct_audio_enable_toggle'] = {
+			name: 'Audio: Toggle On/Off',
+			options: [],
+			callback: () => {
+				const goOn = this.state.dct_audio_enable !== 'On'
+				this.send(COMMANDS.dct_audio_enable.choices[goOn ? 'On' : 'Off'])
+				this.state.dct_audio_enable = goOn ? 'On' : 'Off'
+				this.setVariableValues({ dct_audio_enable: this.state.dct_audio_enable })
+				this.checkFeedbacks('dct_audio_enable_is', 'dct_audio_enable_display')
+			},
+		}
+		actions['dct_sdi_range_toggle'] = {
+			name: 'SDI: Toggle Legal/Full',
+			options: [],
+			callback: () => {
+				const goFull = this.state.dct_sdi_range !== 'Full'
+				this.send(COMMANDS.dct_sdi_range.choices[goFull ? 'Full' : 'Legal'])
+				this.state.dct_sdi_range = goFull ? 'Full' : 'Legal'
+				this.setVariableValues({ dct_sdi_range: this.state.dct_sdi_range })
+				this.checkFeedbacks('dct_sdi_range_is', 'dct_sdi_range_display')
+			},
+		}
+		actions['dct_timecode_hold_toggle'] = {
+			name: 'Timecode: Toggle Run/Hold',
+			options: [],
+			callback: () => {
+				const goRun = this.state.dct_timecode_hold !== 'Run'
+				this.send(COMMANDS.dct_timecode_hold.choices[goRun ? 'Run' : 'Hold'])
+				this.state.dct_timecode_hold = goRun ? 'Run' : 'Hold'
+				this.setVariableValues({ dct_timecode_hold: this.state.dct_timecode_hold })
+				this.checkFeedbacks('dct_timecode_hold_display')
+			},
+		}
 		this.setActionDefinitions(actions)
 	}
 
 	// --- presets -----------------------------------------------------------
 	setupPresets() {
 		const presets = {}
-		const btn = (category, name, text, actionId, options) => ({
+		const btn = (category, name, text, actionId, options, feedbacks = []) => ({
 			type: 'button',
 			category,
 			name,
 			style: { text, size: 'auto', color: WHITE, bgcolor: BLUE },
 			steps: [{ down: [{ actionId, options }], up: [] }],
-			feedbacks: [],
+			feedbacks,
 		})
 		for (const [id, c] of Object.entries(COMMANDS)) {
 			if (c.kind === 'enum') {
@@ -334,7 +483,7 @@ class DctViscaInstance extends InstanceBase {
 		}
 		// Rotary-encoder (Stream Deck+) knobs: turn = adjust +/- step, press = sync.
 		for (const p of this.params) {
-			const step = p.max <= 15 ? 1 : this.knobStep()
+			const step = p.step ?? (p.max <= 15 ? 1 : this.knobStep())
 			presets[`knob_${p.id}`] = {
 				type: 'button',
 				category: `${p.group}`,
@@ -351,6 +500,21 @@ class DctViscaInstance extends InstanceBase {
 				],
 				feedbacks: [{ feedbackId: 'knob_value', options: { param: p.id } }],
 			}
+		}
+		presets['wb_kelvin_measure'] = btn('White Balance', 'WB Kelvin Measure', 'WB Measure\\n--', 'dct_wb_temp_measure_now', {}, [
+			{ feedbackId: 'wb_measure_display', options: {} },
+		])
+		presets['audio_enable_toggle'] = btn('Audio', 'Audio: Toggle On/Off', 'Audio\\n--', 'dct_audio_enable_toggle', {}, [
+			{ feedbackId: 'dct_audio_enable_display', options: {} },
+		])
+		presets['sdi_range_toggle'] = btn('System', 'SDI: Toggle Legal/Full', 'SDI\\n--', 'dct_sdi_range_toggle', {}, [
+			{ feedbackId: 'dct_sdi_range_display', options: {} },
+		])
+		presets['timecode_hold_toggle'] = btn('System', 'Timecode: Toggle Run/Hold', 'TC\\n--', 'dct_timecode_hold_toggle', {}, [
+			{ feedbackId: 'dct_timecode_hold_display', options: {} },
+		])
+		for (const [id, bgcolor] of Object.entries(PRESET_BGCOLOR_OVERRIDES)) {
+			if (presets[id]) presets[id].style.bgcolor = bgcolor
 		}
 		this.setPresetDefinitions(presets)
 	}
@@ -371,6 +535,8 @@ class DctViscaInstance extends InstanceBase {
 		this.setFeedbackDefinitions({
 			ae_mode_is: modeFeedback('AE mode is', ENUM.ae, 'ae_mode'),
 			wb_mode_is: modeFeedback('WB mode is', ENUM.wb, 'wb_mode'),
+			dct_audio_enable_is: modeFeedback('Audio Enable is', ENUM.dct_onoff, 'dct_audio_enable'),
+			dct_sdi_range_is: modeFeedback('SDI Range is', ENUM.dct_sdi_range, 'dct_sdi_range'),
 			connected: {
 				type: 'boolean',
 				name: 'Connection OK',
@@ -390,6 +556,42 @@ class DctViscaInstance extends InstanceBase {
 					const v = this.state[p.varId]
 					const bar = progressBar(Number(v), p.min, p.max)
 					return { text: `${p.name}\\n${v ?? '--'}\\n${bar}`, size: 'auto' }
+				},
+			},
+			wb_measure_display: {
+				type: 'advanced',
+				name: 'WB Kelvin Measure (display)',
+				options: [],
+				callback: () => {
+					const v = this.state.dct_wb_temp_measure
+					return { text: `WB Measure\\n${v ?? '--'} K`, size: 'auto' }
+				},
+			},
+			dct_audio_enable_display: {
+				type: 'advanced',
+				name: 'Audio Enable toggle (display)',
+				options: [],
+				callback: () => {
+					const on = this.state.dct_audio_enable === 'On'
+					return { text: `Audio\\n${on ? 'ON' : 'OFF'}`, size: 'auto', bgcolor: on ? LIGHT_CYAN : DARK_CYAN, color: WHITE }
+				},
+			},
+			dct_sdi_range_display: {
+				type: 'advanced',
+				name: 'SDI Range toggle (display)',
+				options: [],
+				callback: () => {
+					const full = this.state.dct_sdi_range === 'Full'
+					return { text: `SDI\\n${full ? 'FULL' : 'LEGAL'}`, size: 'auto', bgcolor: full ? LIGHT_BLUE : BLUE, color: WHITE }
+				},
+			},
+			dct_timecode_hold_display: {
+				type: 'advanced',
+				name: 'Timecode toggle (display)',
+				options: [],
+				callback: () => {
+					const on = this.state.dct_timecode_hold === 'Run'
+					return { text: `TC\\n${on ? 'RUN' : 'HOLD'}`, size: 'auto', bgcolor: on ? LIGHT_GRAY : DARK_GRAY, color: WHITE }
 				},
 			},
 		})
@@ -439,18 +641,7 @@ class DctViscaInstance extends InstanceBase {
 		const addr = this.config?.address || 1
 		for (const q of entries) {
 			this.enqueue(buildFrame(addr, q.payload), (reply, kind) => {
-				let value = 'n/a'
-				if (kind === 0x50) value = decodeReply(q.decode, reply.subarray(2, reply.length - 1))
-				this.state[q.varId] = value
-				this.setVariableValues({ [q.varId]: value })
-				// Re-sync the knob target to the camera's real value (numeric params).
-				if (q.decode.type === 'value') {
-					const n = parseInt(value, 10)
-					if (Number.isFinite(n)) this.knob[q.varId] = n
-				}
-				if (q.varId === 'ae_mode') this.checkFeedbacks('ae_mode_is')
-				if (q.varId === 'wb_mode') this.checkFeedbacks('wb_mode_is')
-				this.checkFeedbacks('knob_value')
+				this.applyInquiryReply(q, reply, kind)
 				if (--remaining <= 0) finish()
 			})
 		}

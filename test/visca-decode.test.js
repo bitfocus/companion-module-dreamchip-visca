@@ -235,16 +235,16 @@ test('rud command with firmware read-modify-write support (Red Gain up)', () => 
 	assert.match(up[0].provideo, /read-modify-write \(\+step\)/)
 })
 
-test('enum command with a per-choice ProVideo mapping (White Balance -> Indoor)', () => {
+test('enum command with a per-choice ProVideo mapping (WB -> Indoor)', () => {
 	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x35, 0x01])))
-	assert.match(entries[0].companion, /White Balance = Indoor/)
+	assert.match(entries[0].companion, /WB = Indoor/)
 	assert.equal(entries[0].provideo, 'wb_preset 1')
 })
 
-test("cam_wb's Color Temp choice explains why it errors (wb_preset is real, this path just can't carry an index)", () => {
-	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x35, 0x20]))) // Color Temp
-	assert.match(entries[0].provideo, /wb_preset is real/)
-	assert.match(entries[0].provideo, /Color Temp \(direct\)/)
+test('enum command with a per-choice ProVideo mapping (AE -> Auto)', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x39, 0x00])))
+	assert.match(entries[0].companion, /AE = Auto/)
+	assert.equal(entries[0].provideo, 'aec 1')
 })
 
 test('cam_bright (RUD) supports Reset/Up/Down via read-modify-write of post_bright', () => {

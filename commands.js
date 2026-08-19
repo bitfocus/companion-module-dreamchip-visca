@@ -186,15 +186,15 @@ export const COMMANDS = {
 	// System
 	if_clear: { name: 'IF Clear', group: 'System', kind: 'fixed', bytes: P(0x01, 0x00, 0x01) },
 	cam_settings_save: { name: 'Settings Save', group: 'System', kind: 'fixed', bytes: P(0x01, 0x04, 0xa5, 0x10) },
-	cam_settings_reset: { name: 'Settings Reset', group: 'System', kind: 'fixed', bytes: P(0x01, 0x04, 0xa0, 0x10) },
+	cam_settings_reset: { name: 'All Reset', group: 'System', kind: 'fixed', bytes: P(0x01, 0x04, 0xa0, 0x10) },
 
 	// Video mode (see SYSTEM dialect caveat)
 	cam_system: { name: 'Video', group: 'Video Modes', kind: 'video' },
 
 	// Exposure / AEC
 	cam_ae: {
-		name: 'AE Mode', group: 'Exposure', kind: 'enum',
-		choices: { 'Full Auto': P(0x01, 0x04, 0x39, 0x00), Manual: P(0x01, 0x04, 0x39, 0x03), 'Shutter Pri': P(0x01, 0x04, 0x39, 0x0a) },
+		name: 'AE', group: 'Exposure', kind: 'enum',
+		choices: { 'Auto': P(0x01, 0x04, 0x39, 0x00), Manual: P(0x01, 0x04, 0x39, 0x03), 'Shutter Pri': P(0x01, 0x04, 0x39, 0x0a) },
 	},
 	// Reset/Up/Down is the standard VISCA CAM_Gain structure. Up/Down are a
 	// firmware-side read-modify-write of cam_gain's real value (query current
@@ -209,7 +209,7 @@ export const COMMANDS = {
 	// sensor) that map to the SAME wire command as cam_gain_direct (01 04 4C
 	// ...) via the GAIN_ISO table above. Purely additive -- the raw
 	// cam_gain_direct number control is left untouched for manual/precise entry.
-	cam_gain_iso: { name: 'Gain (ISO)', group: 'Exposure', kind: 'iso', prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00), nibbles: 3 },
+	cam_gain_iso: { name: 'Gain', group: 'Exposure', kind: 'iso', prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00), nibbles: 3 },
 	// Reset/Up/Down is the standard VISCA CAM_Shutter structure. Up/Down are a
 	// firmware-side read-modify-write of cam_exposure's real value (query
 	// current value, step by ~93us -- the same "10 raw nibble-steps' worth"
@@ -222,7 +222,7 @@ export const COMMANDS = {
 	// to the SAME wire command as cam_shutter_direct (01 04 4A ...) via the
 	// SHUTTER_SPEEDS table above. Purely additive -- the raw cam_shutter_direct
 	// number control is left untouched for manual/precise entry.
-	cam_shutter_speed: { name: 'Shutter (Speed)', group: 'Exposure', kind: 'shutter', prefix: P(0x01, 0x04, 0x4a, 0x00, 0x00), nibbles: 3 },
+	cam_shutter_speed: { name: 'Shutter', group: 'Exposure', kind: 'shutter', prefix: P(0x01, 0x04, 0x4a, 0x00, 0x00), nibbles: 3 },
 	cam_flicker: {
 		name: 'Flicker', group: 'Exposure', kind: 'enum',
 		choices: { Off: P(0x01, 0x04, 0x23, 0x00), '50Hz': P(0x01, 0x04, 0x23, 0x01), '60Hz': P(0x01, 0x04, 0x23, 0x02) },
@@ -236,11 +236,10 @@ export const COMMANDS = {
 	// that actually runs the one-push calculation), so it's not exposed as a
 	// separate choice here.
 	cam_wb: {
-		name: 'White Balance', group: 'White Balance', kind: 'enum',
+		name: 'WB', group: 'White Balance', kind: 'enum',
 		choices: {
 			Auto: P(0x01, 0x04, 0x35, 0x00), Indoor: P(0x01, 0x04, 0x35, 0x01), Outdoor: P(0x01, 0x04, 0x35, 0x02),
-			Manual: P(0x01, 0x04, 0x35, 0x05), 'Color Temp': P(0x01, 0x04, 0x35, 0x20),
-			Trigger: P(0x01, 0x04, 0x10, 0x05),
+			Manual: P(0x01, 0x04, 0x35, 0x05), Trigger: P(0x01, 0x04, 0x10, 0x05),
 		},
 	},
 	cam_rgain: { name: 'Red Gain', group: 'White Balance', kind: 'rud', func: 0x03 },
@@ -281,7 +280,10 @@ export const COMMANDS = {
 	// read-only inquiries (see below) sharing this same SS 0x0B via a
 	// selector byte, since bare "wb_temp" returns all three at once and no
 	// VISCA command in this module packs multiple values into one inquiry.
-	dct_wb_temp: { name: 'Color Temp (Kelvin)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x0b), nibbles: 4, min: 2200, max: 10000 },
+	// step: 50 overrides the generic knob preset's default step (main.js's
+	// global `knobStep` config, meant for small/raw-range params) -- this
+	// range spans 7800 real Kelvin, so that default is imperceptibly fine.
+	dct_wb_temp: { name: 'Color Temp (Kelvin)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x0b), nibbles: 4, min: 2200, max: 10000, step: 50 },
 
 	// Picture
 	cam_gamma: {
@@ -407,12 +409,16 @@ export const COMMANDS = {
 	// outside that with -EINVAL); same treatment as sdi_black above.
 	dct_sdi_white: { name: 'SDI White', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x32), nibbles: 2, signed: true, min: -80, max: 79 },
 
-	dct_osd: { name: 'OSD', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x52, 0x00), On: P(0x01, 0x7e, 0x01, 0x52, 0x01) } },
-	dct_audio_enable: { name: 'Audio Enable', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x65, 0x00), On: P(0x01, 0x7e, 0x01, 0x65, 0x01) } },
+	dct_audio_enable: { name: 'Audio Enable', group: 'Audio', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x65, 0x00), On: P(0x01, 0x7e, 0x01, 0x65, 0x01) } },
 	// audio_gain's real range is 0-65535 (4.12 fixed-point, 4096 = 1.0x unity
 	// gain); kept at 3 nibbles (0-4095) with firmware scaling by 16 to cover
 	// 0-65520 -- the top 15 values are unreachable, an accepted tradeoff.
-	dct_audio_gain: { name: 'Audio Gain', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x66), nibbles: 3 },
+	// logScale: the raw value is a linear amplitude multiplier, but audio
+	// level perception (and dB) is logarithmic -- a flat per-turn raw
+	// increment feels huge near the bottom of the range and imperceptible
+	// near the top. adjustParam() (main.js) multiplies/divides by
+	// (1 + stepPercent/100) per knob turn instead of adding a flat step.
+	dct_audio_gain: { name: 'Audio Gain', group: 'Audio', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x66), nibbles: 3, logScale: true, stepPercent: 5 },
 
 	// --- AEC (auto exposure control) individual fields ------------------------
 	// aec's real signature is "aec <enable> <setPoint> <speed> <clmTolerance>
@@ -452,7 +458,7 @@ export const INQUIRIES = {
 	gain: { name: 'Gain', varId: 'gain', payload: P(0x09, 0x04, 0x4c), decode: { type: 'value' } },
 	shutter: { name: 'Shutter', varId: 'shutter', payload: P(0x09, 0x04, 0x4a), decode: { type: 'value' } },
 	wb_mode: { name: 'WB Mode', varId: 'wb_mode', payload: P(0x09, 0x04, 0x35), decode: { type: 'enum', map: ENUM.wb } },
-	rgain: { name: 'Red Gain', varId: 'rgain', payload: P(0x09, 0x04, 0x43), decode: { type: 'value' } },
+	rgain: { name: 'R Gain', varId: 'rgain', payload: P(0x09, 0x04, 0x43), decode: { type: 'value' } },
 	bgain: { name: 'Blue Gain', varId: 'bgain', payload: P(0x09, 0x04, 0x44), decode: { type: 'value' } },
 	color_temp: { name: 'Color Temp', varId: 'color_temp', payload: P(0x09, 0x04, 0x20), decode: { type: 'value' } },
 	// The three fields of "wb_temp"'s bare dump ("<current> <min> <max>"),
@@ -546,6 +552,9 @@ export function continuousParams() {
 				signed: !!c.signed,
 				min: c.min ?? wireMin,
 				max: c.max ?? wireMax,
+				step: c.step,
+				logScale: !!c.logScale,
+				stepPercent: c.stepPercent,
 			}
 		})
 }

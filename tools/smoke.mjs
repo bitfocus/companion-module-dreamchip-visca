@@ -15,7 +15,7 @@ const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
 
 // Benign SET samples (no-ops / safe on the sim; avoids settings reset & power).
 const SETS = [
-	['AE Full Auto', [0x01, 0x04, 0x39, 0x00]],
+	['AE Auto', [0x01, 0x04, 0x39, 0x00]],
 	['WB Auto', [0x01, 0x04, 0x35, 0x00]],
 	['Red Gain Up', [0x01, 0x04, 0x03, 0x02]],
 ]

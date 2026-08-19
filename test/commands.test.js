@@ -423,7 +423,7 @@ test('a continuous param builds the expected absolute-set frame', () => {
 // --- end-to-end frame shape (buildFrame + table) ---------------------------
 test('representative frames build to the exact bytes', () => {
 	assert.deepEqual(
-		[...buildFrame(1, COMMANDS.cam_ae.choices['Full Auto'])],
+		[...buildFrame(1, COMMANDS.cam_ae.choices['Auto'])],
 		[0x81, 0x01, 0x04, 0x39, 0x00, 0xff],
 	)
 	assert.deepEqual(
@@ -752,4 +752,33 @@ test("continuousParams' SDI Black/White entries are narrowed to their real signe
 	assert.equal(white.signed, true)
 	assert.equal(white.min, -80)
 	assert.equal(white.max, 79)
+})
+
+test("cam_wb has no 'Color Temp' choice (func 0x35 data 0x20 has no room for a preset index -- always errors, see color_temp_direct)", () => {
+	assert.equal(COMMANDS.cam_wb.choices['Color Temp'], undefined)
+})
+
+test('dct_osd is not exposed as a command (buttons removed), but its inquiry/variable still exists', () => {
+	assert.equal(COMMANDS.dct_osd, undefined)
+	assert.ok(INQUIRIES.dct_osd, 'INQUIRIES.dct_osd should still exist')
+	assert.equal(INQUIRIES.dct_osd.varId, 'dct_osd')
+})
+
+test('Audio Enable and Audio Gain are grouped under Audio (not System)', () => {
+	assert.equal(COMMANDS.dct_audio_enable.group, 'Audio')
+	assert.equal(COMMANDS.dct_audio_gain.group, 'Audio')
+})
+
+test("continuousParams' Audio Gain entry is logScale (perceived audio level is logarithmic, not linear)", () => {
+	const p = continuousParams().find((x) => x.id === 'dct_audio_gain')
+	assert.equal(p.logScale, true)
+	assert.equal(p.stepPercent, 5)
+	assert.equal(p.min, 0)
+	assert.equal(p.max, 4095)
+})
+
+test("continuousParams' logScale defaults to false and stepPercent to undefined for ordinary (non-audio) params", () => {
+	const p = continuousParams().find((x) => x.id === 'cam_gain_direct')
+	assert.equal(p.logScale, false)
+	assert.equal(p.stepPercent, undefined)
 })

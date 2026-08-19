@@ -30,7 +30,7 @@ export const PROVIDEO_NAMES = {
 	cam_system: { cmd: null, note: 'video-mode dialect is conditional/interop-specific (CONFIG_VISCA_CMD_LENS_STUB); see visca_map_system.c, not a flat mapping' },
 
 	// --- category 0x04 exposure (visca_map_exposure.c) ----------------------
-	cam_ae: { choices: { 'Full Auto': 'aec 1', Manual: 'aec 0', 'Shutter Pri': 'aec 1' } },
+	cam_ae: { choices: { Auto: 'aec 1', Manual: 'aec 0', 'Shutter Pri': 'aec 1' } },
 	ae_mode: { cmd: 'aec', scaled: false, note: 'readback: aec!=0 -> Full Auto, else Manual (Shutter Pri is not distinguishable on readback)' },
 	cam_gain: { cmd: 'cam_gain', rud: { reset: 'cam_gain 1000', up: 'read-modify-write (+109)', down: 'read-modify-write (-109)' } },
 	cam_gain_direct: {
@@ -62,13 +62,6 @@ export const PROVIDEO_NAMES = {
 		choices: {
 			Auto: 'awb 1', Indoor: 'wb_preset 1', Outdoor: 'wb_preset 2',
 			Manual: 'awb 0', Trigger: 'wb',
-			// wb_preset is a real, working command (see Indoor/Outdoor above and
-			// color_temp_direct/"Color Temp (direct)", which sets it directly) --
-			// but THIS VISCA path (func 0x35, data 0x20) is a single byte with no
-			// room to carry a preset index, so wb_command's switch has nothing to
-			// act on and always falls through to -ENOTSUP. Use Color Temp (direct)
-			// to actually select a preset.
-			'Color Temp': "wb_preset is real (see Color Temp (direct)), but this VISCA path (func 0x35 data 0x20) has no room for a preset index -- always errors",
 		},
 	},
 	wb_mode: { cmd: 'awb', scaled: false, note: 'readback only distinguishes Auto/Manual, not preset/trigger detail' },

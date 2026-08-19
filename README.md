@@ -7,12 +7,13 @@ VISCA inquiries.
 Supported: the standard VISCA camera set — system/power, exposure (AE, gain,
 shutter), white balance (+ red/blue/colour gains, colour temperature in
 Kelvin), picture (gamma, brightness, contrast, flip/mirror), video mode,
-flicker, memory, settings save/reset — plus Dream Chip vendor extensions
+flicker, settings save/reset — plus Dream Chip vendor extensions
 (green gain, gain mode, black levels, flare, AWB speed, S-Log3 gain, colour
 space, PQ, noise reduction, detail/denoise, LUT mode/preset, SDI
-range/levels, MCC op-mode, OSD, audio, Timecode, white-balance colour
-temperature (settable Kelvin + measured scene cct)). Pan/tilt/zoom/focus are
-out of scope.
+range/levels, MCC op-mode, audio, Timecode, white-balance colour
+temperature (settable Kelvin + measured scene cct)). Toggle-style buttons are
+also available for the binary controls (Audio Enable, SDI Range, Timecode
+Run/Hold). Pan/tilt/zoom/focus are out of scope.
 
 ## Requirements
 
@@ -35,7 +36,7 @@ In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
 ## What it exposes
 
 - **Actions** — one per command:
-  - enum commands → a dropdown (e.g. AE Mode, White Balance, Gamma, Flip),
+  - enum commands → a dropdown (e.g. AE Mode, WB, Gamma, Flip),
   - reset/up/down commands → a dropdown (Gain, Shutter, Red/Blue Gain, Bright),
   - "direct" commands → a numeric value input,
   - Gain (ISO) → a dropdown of named ISO steps (140–6400, OG03A10 sensor); the raw Gain (direct) input stays for manual entry,
@@ -44,9 +45,9 @@ In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
   - Video → a dropdown of named modes (1080p30, 1080p25, …, 1080i50), plus "Poll inquiries now",
   - **"Knob: Adjust value (relative)"** → pick a parameter + a signed step (used by
     the knob presets, but also assignable to any button).
-- **Presets** — a button per command choice, grouped by category (System, Power,
-  Exposure, White Balance, Picture, Video, and the Dream Chip extension groups),
-  plus **rotary-knob presets** (see below), grouped under `Knobs: …`.
+- **Presets** — a button per command choice, grouped by category (System,
+  Exposure, White Balance, Audio, and Video Modes), plus **rotary-knob
+  presets** (see below), grouped under `Knobs: …`.
 - **Variables** — one per inquiry, updated by the poller, e.g. `$(visca:wb_mode)`,
   `$(visca:ae_mode)`, `$(visca:gain)`, `$(visca:version)`. The prefix is your
   connection's label.
