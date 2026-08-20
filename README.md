@@ -30,7 +30,7 @@ In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
 | **Target IP** / **TCP port** | TCP mode: the camera's IP and VISCA TCP port (default `4000`) |
 | **Serial port** / **Baud** | Serial mode: the COM port (e.g. `COM3` or `/dev/ttyUSB0`) and baud (default `115200`). Run Companion on the machine physically wired to the camera |
 | **Camera address** | VISCA address `1`–`7` (default `1`) |
-| **Poll ms** | Read-back polling interval in ms; `0` = off (send-only). Set it >0 (e.g. `2000`) to keep variables and feedbacks live |
+| **Poll ms** | Read-back polling interval in ms; `0` = off (send-only). Set it >0 (e.g. `2000`) to keep variables and feedbacks live. Only the "live" tier is repeated on this interval -- calibration/setup-style values (LUT, filters, CNR/DPF, SDI, gamma, black levels, flare, audio, etc.) are read once per connection instead; use "System: Poll startup values now" to re-sync them on demand |
 | **Knob step** | Turn increment for rotary-knob presets on `0`–`255` params (default `4`); `0`–`15` params always step by 1 |
 
 ## What it exposes
@@ -42,7 +42,7 @@ In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
   - Gain (ISO) → a dropdown of named ISO steps (140–6400, OG03A10 sensor); the raw Gain (direct) input stays for manual entry,
   - Shutter (Speed) → a dropdown of named 1/n shutter speeds (1/8000–1/30); the raw Shutter (direct) input stays for manual entry,
   - fixed commands → IF Clear, Settings Save/Reset, Load Settings,
-  - Video → a dropdown of named modes (1080p30, 1080p25, …, 1080i50), plus "Poll inquiries now",
+  - Video → a dropdown of named modes (1080p30, 1080p25, …, 1080i50), plus "Poll inquiries now" (refreshes everything) and "Poll startup values now" (refreshes just the calibration/setup-style tier -- see Poll ms above),
   - **"Knob: Adjust value (relative)"** → pick a parameter + a signed step (used by
     the knob presets, but also assignable to any button).
 - **Presets** — a button per command choice, grouped by category (System,

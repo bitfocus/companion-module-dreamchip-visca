@@ -26,6 +26,18 @@ Reset is still always run once at the very end regardless, as the cleanup
 step described above. It is not part of `npm test`, and requires a camera
 attached.
 
+Companion's own background polling (`main.js`) is two-tier: 36 of the 54
+inquiries are calibration/setup-style values (`INQUIRIES.*.once: true` in
+`commands.js`) that are only ever queried once per connection
+(`pollStartupOnce()`) or on demand ("System: Poll startup values now"), not
+on the recurring interval timer (`pollLiveOnce()`). SDI Range, Timecode, and
+Audio Enable stay on the continuous tier despite being DCT settings, since
+they back the SDI/Timecode/Audio toggle buttons' live status display. The
+"Poll inquiries now"
+action still refreshes everything regardless of tier. This doesn't change
+what's testable here -- every inquiry below is still reachable, just not
+necessarily via the recurring poll.
+
 ## Commands
 
 ### System
@@ -101,7 +113,7 @@ attached.
 | Gain: reset | cam_gain 1000 | [ Y] | |
 | Gain: up | read-modify-write (+109) | [ Y] | |
 | Gain: down | read-modify-write (-109) | [ Y] | |
-| Gain (direct) | cam_gain <raw=<value>>  // real range is 1000-45715 (1x/0dB/140 ISO min; max from the current AUTO gain-mode range); raw is 0-4095, linearly scaled, not a placeholder | [ Y] | |
+| Gain (direct) | cam_gain <raw=<value>>  // real range is 1000-45715 (1x/0dB/140 ISO min; max from the current AUTO gain-mode range); raw is 0-4095, linearly scaled, not a placeholder; knob is log-scaled (5%/turn, 4-raw-unit minimum step), see main.js adjustParam() | [ Y] | |
 | Shutter: reset | cam_exposure 1000 | [ Y] | |
 | Shutter: up | read-modify-write (+93us) | [ Y] | |
 | Shutter: down | read-modify-write (-93us) | [ Y] | |

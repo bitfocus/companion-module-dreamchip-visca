@@ -57,6 +57,14 @@ const PRESET_BGCOLOR_OVERRIDES = {
 // "direct" counterparts.
 const RUD_INQUIRY_ID = { cam_gain: 'gain', cam_shutter: 'shutter', cam_rgain: 'rgain', cam_bgain: 'bgain', cam_bright: 'bright' }
 
+// enum COMMANDS ids whose plain per-choice buttons (not just their dedicated
+// toggle action) should also confirmIfNotPolling() after sending -- these 3
+// stayed on the continuous poll tier specifically so their toggle buttons'
+// live status stays accurate; the plain "SDI Range: Legal"/"Audio Enable:
+// On"/"Timecode: Run"-style buttons set the exact same value, so they need
+// the same confirmation when auto poll is off.
+const CONFIRM_POLL_ENUM_IDS = new Set(['dct_sdi_range', 'dct_timecode_hold', 'dct_audio_enable'])
+
 // `cam_settings_reset`/`dct_load_settings` change most camera parameters at
 // once as a side effect of one command; without a follow-up poll, every
 // displayed variable/feedback keeps showing its pre-reset value until the
@@ -73,7 +81,13 @@ const REFRESH_AFTER_IDS = new Set(['cam_settings_reset', 'dct_load_settings'])
 // exists (setupVariables() derives its list from INQUIRIES), but excluded
 // from actual polling: sending it every cycle would be a wasted round trip
 // AND would keep stomping the optimistic value set below back to 'n/a'.
-const NO_POLL_INQUIRY_IDS = new Set(['color_temp'])
+//
+// dct_wb_temp_measure is excluded for a different reason -- it works fine
+// (wb_temp_measure_inquiry runs a real, fresh capture every request), it's
+// just meant to be on-demand only, via the dedicated "WB Kelvin Measure"
+// button/action (dct_wb_temp_measure_now), not refreshed automatically on
+// every poll tick.
+const NO_POLL_INQUIRY_IDS = new Set(['color_temp', 'dct_wb_temp_measure'])
 // color_temp_direct (COMMANDS id) is the SET-only counterpart -- since it can
 // never be confirmed via inquiry, reflect the just-sent value immediately
 // instead of leaving its variable stuck at 'n/a' forever.
@@ -158,6 +172,7 @@ class DctViscaInstance extends InstanceBase {
 			this.updateStatus(InstanceStatus.Ok)
 			this.checkFeedbacks('connected')
 			this.pump()
+			this.pollStartupOnce()
 		})
 		port.on('data', (chunk) => this.onData(chunk))
 		port.on('close', () => {
@@ -198,7 +213,10 @@ class DctViscaInstance extends InstanceBase {
 			this.log('error', `TCP error: ${err.message}`)
 			this.updateStatus(InstanceStatus.ConnectionFailure, err.message)
 		})
-		this.socket.on('connect', () => this.pump())
+		this.socket.on('connect', () => {
+			this.pump()
+			this.pollStartupOnce()
+		})
 		this.socket.on('data', (chunk) => this.onData(chunk))
 	}
 
@@ -278,6 +296,15 @@ class DctViscaInstance extends InstanceBase {
 		this.enqueue(buildFrame(this.config?.address || 1, q.payload), (reply, kind) => this.applyInquiryReply(q, reply, kind))
 	}
 
+	// An optimistic local write (e.g. a toggle action) assumes the SET
+	// succeeded -- if it actually errored, nothing corrects that unless
+	// something re-reads the real value. Background polling already does
+	// that on its next cycle if it's running; if it's off, fire a single
+	// confirming inquiry instead so the display doesn't silently drift wrong.
+	confirmIfNotPolling(qId) {
+		if (!(Number(this.config?.pollInterval) > 0)) this.inquireOnce(qId)
+	}
+
 	// --- knobs (relative adjust of continuous params) ----------------------
 	knobStep() {
 		const n = Number(this.config?.knobStep)
@@ -302,14 +329,17 @@ class DctViscaInstance extends InstanceBase {
 			// linear "step" config, which doesn't apply here) so each turn is a
 			// constant *percentage* change, matching how audio level/dB works,
 			// instead of a constant raw amount that's huge at the low end of the
-			// range and imperceptible at the high end.
+			// range and imperceptible at the high end. `minStep` floors how small
+			// that percentage step is allowed to get at the low end of the range
+			// (where e.g. 5% of a small value would otherwise round to ~1).
 			const factor = 1 + (p.stepPercent ?? 5) / 100
+			const minStep = p.minStep ?? 1
 			if (delta >= 0) {
 				raw = Math.round(Math.max(cur, 1) * factor)
-				if (raw <= cur) raw = cur + 1 // guarantee progress escaping 0
+				if (raw < cur + minStep) raw = cur + minStep
 			} else {
 				raw = Math.round(cur / factor)
-				if (raw >= cur) raw = Math.max(0, cur - 1) // guarantee progress down to 0
+				if (raw > cur - minStep) raw = Math.max(0, cur - minStep)
 			}
 		} else {
 			raw = cur + delta
@@ -331,7 +361,10 @@ class DctViscaInstance extends InstanceBase {
 			if (c.kind === 'enum') {
 				const ids = Object.keys(c.choices)
 				a.options = [{ type: 'dropdown', id: 'choice', label: c.name, default: ids[0], choices: ids.map((x) => ({ id: x, label: x })) }]
-				a.callback = (ev) => this.send(c.choices[ev.options.choice])
+				a.callback = (ev) => {
+					this.send(c.choices[ev.options.choice])
+					if (CONFIRM_POLL_ENUM_IDS.has(id)) this.confirmIfNotPolling(id)
+				}
 			} else if (c.kind === 'rud') {
 				const rudChoices = c.rudChoices ?? Object.keys(RUD)
 				a.options = [{ type: 'dropdown', id: 'choice', label: 'Action', default: rudChoices[0], choices: rudChoices.map((x) => ({ id: x, label: x })) }]
@@ -395,6 +428,7 @@ class DctViscaInstance extends InstanceBase {
 			callback: (ev) => this.adjustParam(ev.options.param, Number(ev.options.step)),
 		}
 		actions['poll_now'] = { name: 'System: Poll inquiries now', options: [], callback: () => this.pollOnce() }
+		actions['poll_startup_now'] = { name: 'System: Poll startup values now', options: [], callback: () => this.pollStartupOnce() }
 		// wb_temp_measure has no SET side (it's a live, continuously-updated
 		// AWB filter reading, not something you configure) -- so it has no
 		// COMMANDS entry and is invisible to the generic loop above. Fire just
@@ -417,6 +451,7 @@ class DctViscaInstance extends InstanceBase {
 				this.state.dct_audio_enable = goOn ? 'On' : 'Off'
 				this.setVariableValues({ dct_audio_enable: this.state.dct_audio_enable })
 				this.checkFeedbacks('dct_audio_enable_is', 'dct_audio_enable_display')
+				this.confirmIfNotPolling('dct_audio_enable')
 			},
 		}
 		actions['dct_sdi_range_toggle'] = {
@@ -428,6 +463,7 @@ class DctViscaInstance extends InstanceBase {
 				this.state.dct_sdi_range = goFull ? 'Full' : 'Legal'
 				this.setVariableValues({ dct_sdi_range: this.state.dct_sdi_range })
 				this.checkFeedbacks('dct_sdi_range_is', 'dct_sdi_range_display')
+				this.confirmIfNotPolling('dct_sdi_range')
 			},
 		}
 		actions['dct_timecode_hold_toggle'] = {
@@ -439,6 +475,7 @@ class DctViscaInstance extends InstanceBase {
 				this.state.dct_timecode_hold = goRun ? 'Run' : 'Hold'
 				this.setVariableValues({ dct_timecode_hold: this.state.dct_timecode_hold })
 				this.checkFeedbacks('dct_timecode_hold_display')
+				this.confirmIfNotPolling('dct_timecode_hold')
 			},
 		}
 		this.setActionDefinitions(actions)
@@ -601,7 +638,7 @@ class DctViscaInstance extends InstanceBase {
 	startPolling() {
 		this.stopPolling()
 		const ms = Number(this.config?.pollInterval)
-		if (ms > 0) this.pollTimer = setInterval(() => this.pollOnce(), ms)
+		if (ms > 0) this.pollTimer = setInterval(() => this.pollLiveOnce(), ms)
 	}
 	stopPolling() {
 		if (this.pollTimer) {
@@ -610,20 +647,17 @@ class DctViscaInstance extends InstanceBase {
 		}
 	}
 
-	pollOnce() {
+	// Shared batch-poll engine: sends every inquiry in `entries` through the
+	// queue and tracks completion via the one shared `pollBusy` gate --
+	// pollOnce()/pollLiveOnce()/pollStartupOnce() all share the same serial
+	// queue, so overlapping any combination of them would cause the same
+	// backlog problem the gate was built for in the first place (see
+	// pollLiveOnce()'s comment). All ~55 INQUIRIES share the one serial send
+	// queue (enqueue()/pump()), which only ever has one command in flight --
+	// so a full cycle can take far longer than a short poll interval.
+	pollBatch(entries) {
 		if (!this.socket?.isConnected) return
-		// All ~55 INQUIRIES share the one serial send queue (enqueue()/pump()),
-		// which only ever has one command in flight -- so a full cycle can take
-		// far longer than a short poll interval. Without this guard, an
-		// interval timer firing again before the previous cycle's replies are
-		// all back just piles another 55 frames onto an ever-growing backlog,
-		// starving out any button-press action queued behind it (this is what
-		// "flooding" at low poll intervals actually was). Skip this tick
-		// entirely if the last cycle hasn't finished draining yet.
 		if (this.pollBusy) return
-		const entries = Object.entries(INQUIRIES)
-			.filter(([id]) => !NO_POLL_INQUIRY_IDS.has(id))
-			.map(([, q]) => q)
 		if (!entries.length) return
 		this.pollBusy = true
 		let remaining = entries.length
@@ -645,6 +679,30 @@ class DctViscaInstance extends InstanceBase {
 				if (--remaining <= 0) finish()
 			})
 		}
+	}
+
+	// "Poll inquiries now" action: an explicit "sync everything" request, so
+	// it stays exhaustive -- every inquiry except the ones that can never
+	// succeed at all (NO_POLL_INQUIRY_IDS), regardless of the `once` tier.
+	pollOnce() {
+		this.pollBatch(Object.entries(INQUIRIES).filter(([id]) => !NO_POLL_INQUIRY_IDS.has(id)).map(([, q]) => q))
+	}
+
+	// The recurring background cycle (startPolling()'s setInterval). Skips
+	// both NO_POLL_INQUIRY_IDS and the `once`-tagged startup-only tier
+	// (calibration/setup-style values that don't change on their own during
+	// a live session) -- only the "live" tier needs repeated polling, which
+	// keeps every cycle shorter than a full pollOnce() would be.
+	pollLiveOnce() {
+		this.pollBatch(Object.entries(INQUIRIES).filter(([id, q]) => !NO_POLL_INQUIRY_IDS.has(id) && !q.once).map(([, q]) => q))
+	}
+
+	// Fired once per successful (re)connection (see initSerial()/initTCP())
+	// and by the "System: Poll startup values now" action -- refreshes just
+	// the `once`-tagged tier pollLiveOnce() otherwise never touches, in case
+	// it changed while disconnected (another controller, a reboot, etc.).
+	pollStartupOnce() {
+		this.pollBatch(Object.values(INQUIRIES).filter((q) => q.once))
 	}
 
 	// --- lifecycle ---------------------------------------------------------

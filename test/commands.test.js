@@ -777,8 +777,51 @@ test("continuousParams' Audio Gain entry is logScale (perceived audio level is l
 	assert.equal(p.max, 4095)
 })
 
-test("continuousParams' logScale defaults to false and stepPercent to undefined for ordinary (non-audio) params", () => {
-	const p = continuousParams().find((x) => x.id === 'cam_gain_direct')
+test("continuousParams' logScale defaults to false and stepPercent to undefined for ordinary (linear) params", () => {
+	const p = continuousParams().find((x) => x.id === 'cam_rgain_direct')
 	assert.equal(p.logScale, false)
 	assert.equal(p.stepPercent, undefined)
+	assert.equal(p.minStep, undefined)
+})
+
+test("continuousParams' Gain (direct) entry is logScale with a 4-raw-unit minimum step (gain is perceived in stops/dB, not linear)", () => {
+	const p = continuousParams().find((x) => x.id === 'cam_gain_direct')
+	assert.equal(p.logScale, true)
+	assert.equal(p.stepPercent, 5)
+	assert.equal(p.minStep, 4)
+	assert.equal(p.min, 0)
+	assert.equal(p.max, 4095)
+})
+
+// --- two-tier polling (main.js pollLiveOnce()/pollStartupOnce()) -----------
+
+test('exactly the 36 calibration/setup-style inquiries are tagged once:true (startup-only tier)', () => {
+	const onceIds = Object.entries(INQUIRIES)
+		.filter(([, q]) => q.once)
+		.map(([id]) => id)
+		.sort()
+	assert.equal(onceIds.length, 36)
+	assert.deepEqual(
+		onceIds,
+		[
+			'dct_aec_maxgain', 'dct_aec_setpoint', 'dct_aec_speed', 'dct_audio_gain',
+			'dct_auto_save', 'dct_awb_speed', 'dct_black_blue', 'dct_black_green', 'dct_black_master',
+			'dct_black_red', 'dct_cnr_auto', 'dct_cnr_mode', 'dct_color_space', 'dct_dpf_enable',
+			'dct_dpf_strength', 'dct_filter_denoise', 'dct_filter_detail', 'dct_filter_enable',
+			'dct_flare_blue', 'dct_flare_green', 'dct_flare_red', 'dct_gain_mode', 'dct_lut_fixed_mode',
+			'dct_lut_mode', 'dct_lut_preset', 'dct_mcc_opmode', 'dct_osd', 'dct_pq_max_bright',
+			'dct_sdi_black', 'dct_sdi_white', 'dct_slog3_gain', 'flicker', 'flip',
+			'gamma', 'version', 'video_mode',
+		].sort(),
+	)
+})
+
+test('Gain/Shutter/AE/WB/RGB-gain/Green-gain/Bright/Contrast/Color-Gain-Hue/Timecode/SDI-Range/Audio-Enable/WB-temp stay on the continuous (non-once) tier', () => {
+	for (const id of [
+		'gain', 'shutter', 'ae_mode', 'wb_mode', 'rgain', 'bgain', 'dct_ggain', 'bright', 'contrast',
+		'color_gain', 'color_hue', 'dct_timecode_hold', 'dct_sdi_range', 'dct_audio_enable',
+		'dct_wb_temp', 'dct_wb_temp_min', 'dct_wb_temp_max',
+	]) {
+		assert.ok(!INQUIRIES[id].once, `${id} should not be tagged once:true`)
+	}
 })
