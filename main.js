@@ -65,6 +65,42 @@ const RUD_INQUIRY_ID = { cam_gain: 'gain', cam_shutter: 'shutter', cam_rgain: 'r
 // the same confirmation when auto poll is off.
 const CONFIRM_POLL_ENUM_IDS = new Set(['dct_sdi_range', 'dct_timecode_hold', 'dct_audio_enable'])
 
+// dct_ggain (kind:'enum', choices Reset/Up/Down) is semantically a RUD-style
+// gain_green control -- it just uses DCT-extension byte payloads instead of
+// the standard VISCA RUD template, so the generic 'rud' branch's RUD_INQUIRY_ID
+// handling doesn't apply to it. Give it the exact same unconditional
+// confirm+resync treatment as cam_rgain/cam_bgain (below), which it otherwise
+// wouldn't get at all.
+const ENUM_RUD_INQUIRY_ID = { dct_ggain: 'dct_ggain' }
+
+// Knobs whose real command already has a proper RUD "Reset" (server-side
+// target, confirmed via RUD_INQUIRY_ID's unconditional resyncKnob confirm-
+// read) -- pressing reuses that exact same action/choice instead of the
+// generic poll_now every other knob gets.
+const KNOB_PRESS_DOWN = {
+	cam_rgain_direct: { actionId: 'cam_rgain', options: { choice: 'reset' } },
+	cam_bgain_direct: { actionId: 'cam_bgain', options: { choice: 'reset' } },
+	dct_ggain_direct: { actionId: 'dct_ggain', options: { choice: 'Reset' } },
+	cam_gain_direct: { actionId: 'cam_gain', options: { choice: 'reset' } },
+	cam_shutter_direct: { actionId: 'cam_shutter', options: { choice: 'reset' } },
+	cam_bright_direct: { actionId: 'cam_bright', options: { choice: 'reset' } },
+}
+
+// Knobs with no existing RUD/enum "reset" concept (kind:'direct' only, no
+// server-side target to ask for) -- pressing sends an explicit direct SET to
+// a fixed value instead. Since we choose the exact value ourselves (unlike a
+// RUD reset, whose real landing value has to be confirmed via inquiry), the
+// generated action can write state/knob directly with no confirm-read needed.
+const KNOB_PRESS_SET_VALUE = {
+	cam_color_hue_direct: 0, // neutral hue -- no shift (post_hue signed -128..127)
+	// post_sat/post_cont's real factory default is 128 (0x80, "1.0x on
+	// Fixpoint 1.7") -- reset_settings_chain(), system_settings.c:690-692.
+	cam_color_gain_direct: 128,
+	cam_contrast_direct: 128,
+	dct_wb_temp: 6500, // common daylight white-balance reference, per user request
+	dct_audio_gain: 256, // per user request
+}
+
 // `cam_settings_reset`/`dct_load_settings` change most camera parameters at
 // once as a side effect of one command; without a follow-up poll, every
 // displayed variable/feedback keeps showing its pre-reset value until the
@@ -88,10 +124,21 @@ const REFRESH_AFTER_IDS = new Set(['cam_settings_reset', 'dct_load_settings'])
 // button/action (dct_wb_temp_measure_now), not refreshed automatically on
 // every poll tick.
 const NO_POLL_INQUIRY_IDS = new Set(['color_temp', 'dct_wb_temp_measure'])
-// color_temp_direct (COMMANDS id) is the SET-only counterpart -- since it can
-// never be confirmed via inquiry, reflect the just-sent value immediately
-// instead of leaving its variable stuck at 'n/a' forever.
-const OPTIMISTIC_DIRECT_IDS = new Set(['color_temp_direct'])
+// color_temp_direct (COMMANDS id) is the SET-only counterpart to color_temp --
+// since it can never be confirmed via inquiry, it especially depends on the
+// 'direct' action's now-unconditional optimistic write (below) to ever show
+// anything but 'n/a'.
+
+// How long a param's this.knob target is protected from background-poll
+// resync after we last wrote it ourselves (setKnobValue()). Long enough to
+// safely cover one full poll cycle's worth of stale-request risk (a poll's
+// inquiry enqueued before a burst of rapid actions, replying after several
+// more already landed -- see the Color Temp knob bug); short enough that a
+// genuinely external change (e.g. AWB actively re-adjusting R/G/B gain,
+// another controller) gets picked back up again soon after we stop touching
+// that specific param, instead of being ignored forever (see the R/G/B gain
+// bug this constant fixes).
+const KNOB_LOCK_MS = 2500
 
 class DctViscaInstance extends InstanceBase {
 	async init(config) {
@@ -101,6 +148,7 @@ class DctViscaInstance extends InstanceBase {
 		this.inflight = null
 		this.rxbuf = Buffer.alloc(0)
 		this.knob = {} // per-varId knob target (relative-adjust state)
+		this.knobLockUntil = {} // per-varId: Date.now() ms until which background polling won't resync this.knob (see setKnobValue())
 		this.params = continuousParams()
 		this.paramById = Object.fromEntries(this.params.map((p) => [p.id, p]))
 
@@ -272,13 +320,27 @@ class DctViscaInstance extends InstanceBase {
 	// Decode a single inquiry's reply and push it into state/variable/knob/
 	// feedbacks -- shared by pollOnce()'s batch loop and any one-off inquiry
 	// (e.g. a RUD action confirming its new value, or a manual "measure now").
-	applyInquiryReply(q, reply, kind) {
+	// opts.resyncKnob additionally updates this.knob[q.varId] -- ONLY safe to
+	// set for a single, deliberate, user-triggered confirmation (a RUD
+	// action's own confirm-read, a knob-press reset), never for a background
+	// poll batch: a poll reply landing mid-turn (its request could easily
+	// have been queued before a burst of rapid knob turns) would otherwise
+	// silently reset the knob's running target backward to an
+	// already-superseded value, and continued turning from the wrong base
+	// could blow straight through to min/max (see the Color Temp knob bug).
+	applyInquiryReply(q, reply, kind, opts = {}) {
 		const value = kind === 0x50 ? decodeReply(q.decode, reply.subarray(2, reply.length - 1)) : 'n/a'
 		this.state[q.varId] = value
 		this.setVariableValues({ [q.varId]: value })
 		if (q.decode.type === 'value') {
 			const n = parseInt(value, 10)
-			if (Number.isFinite(n)) this.knob[q.varId] = n
+			// resyncKnob (a single, deliberate, user-triggered confirmation --
+			// RUD's own confirm-read, a knob-press reset) always wins, since it
+			// IS the authoritative source for the write that started any lock.
+			// A background poll reply only gets to resync this.knob if nothing
+			// more recent (this exact param's own lock) is still protecting it.
+			const locked = (this.knobLockUntil[q.varId] ?? 0) > Date.now()
+			if (Number.isFinite(n) && (opts.resyncKnob || !locked)) this.knob[q.varId] = n
 		}
 		if (q.varId === 'ae_mode') this.checkFeedbacks('ae_mode_is')
 		if (q.varId === 'wb_mode') this.checkFeedbacks('wb_mode_is')
@@ -290,10 +352,10 @@ class DctViscaInstance extends InstanceBase {
 	}
 
 	// Fire a single named inquiry (INQUIRIES key) on demand.
-	inquireOnce(qId) {
+	inquireOnce(qId, opts) {
 		const q = INQUIRIES[qId]
 		if (!q) return
-		this.enqueue(buildFrame(this.config?.address || 1, q.payload), (reply, kind) => this.applyInquiryReply(q, reply, kind))
+		this.enqueue(buildFrame(this.config?.address || 1, q.payload), (reply, kind) => this.applyInquiryReply(q, reply, kind, opts))
 	}
 
 	// An optimistic local write (e.g. a toggle action) assumes the SET
@@ -315,6 +377,19 @@ class DctViscaInstance extends InstanceBase {
 		if (this.knob[varId] !== undefined) return this.knob[varId]
 		const n = parseInt(this.state[varId], 10)
 		return Number.isFinite(n) ? n : 0
+	}
+
+	// Optimistically write a value we know exactly (a plain SET or a knob
+	// turn, as opposed to a RUD reset whose real landing value has to be
+	// confirmed via inquiry) into knob/state/variable, and (re)start this
+	// varId's KNOB_LOCK_MS window so a stale background-poll reply already
+	// in flight can't immediately stomp it back (see applyInquiryReply()).
+	setKnobValue(varId, value) {
+		this.knob[varId] = value
+		this.state[varId] = String(value)
+		this.setVariableValues({ [varId]: String(value) })
+		this.knobLockUntil[varId] = Date.now() + KNOB_LOCK_MS
+		this.checkFeedbacks('knob_value')
 	}
 
 	// Rotary-knob adjust: clamp, send an absolute `direct` set for the param, and
@@ -345,12 +420,9 @@ class DctViscaInstance extends InstanceBase {
 			raw = cur + delta
 		}
 		const next = Math.max(p.min, Math.min(p.max, raw))
-		this.knob[p.varId] = next
 		const c = COMMANDS[p.cmd]
 		this.send([...c.prefix, ...encodeNibbles(next, c.nibbles)])
-		this.state[p.varId] = String(next)
-		this.setVariableValues({ [p.varId]: String(next) })
-		this.checkFeedbacks('knob_value')
+		this.setKnobValue(p.varId, next)
 	}
 
 	// --- actions -----------------------------------------------------------
@@ -364,6 +436,8 @@ class DctViscaInstance extends InstanceBase {
 				a.callback = (ev) => {
 					this.send(c.choices[ev.options.choice])
 					if (CONFIRM_POLL_ENUM_IDS.has(id)) this.confirmIfNotPolling(id)
+					const rudQId = ENUM_RUD_INQUIRY_ID[id]
+					if (rudQId) this.inquireOnce(rudQId, { resyncKnob: true })
 				}
 			} else if (c.kind === 'rud') {
 				const rudChoices = c.rudChoices ?? Object.keys(RUD)
@@ -373,8 +447,11 @@ class DctViscaInstance extends InstanceBase {
 					// Reset/Up/Down all change the real value server-side without
 					// telling us what it landed on -- re-read it immediately so the
 					// knob display/variable don't sit stale until the next poll.
+					// resyncKnob is safe here (unlike a background poll): this is a
+					// single, deliberate, user-triggered confirmation, not something
+					// that can race a burst of knob turns.
 					const qId = RUD_INQUIRY_ID[id]
-					if (qId) this.inquireOnce(qId)
+					if (qId) this.inquireOnce(qId, { resyncKnob: true })
 				}
 			} else if (c.kind === 'direct') {
 				const bits = 4 * c.nibbles
@@ -385,11 +462,11 @@ class DctViscaInstance extends InstanceBase {
 				a.callback = (ev) => {
 					const value = Number(ev.options.value) & mask
 					this.send([...c.prefix, ...encodeNibbles(value, c.nibbles)])
-					if (OPTIMISTIC_DIRECT_IDS.has(id)) {
-						const varId = this.paramById[id].varId
-						this.state[varId] = String(value)
-						this.setVariableValues({ [varId]: String(value) })
-					}
+					// A direct SET's landing value is exactly what we just sent -- no
+					// ambiguity to confirm via inquiry (unlike a RUD reset), so write
+					// state/knob immediately instead of waiting for the next poll.
+					const varId = this.paramById[id]?.varId
+					if (varId) this.setKnobValue(varId, value)
 				}
 			} else if (c.kind === 'fixed') {
 				a.callback = () => {
@@ -408,12 +485,17 @@ class DctViscaInstance extends InstanceBase {
 				a.callback = (ev) => {
 					const raw = GAIN_ISO.find((g) => g.iso === Number(ev.options.iso))?.raw ?? 0
 					this.send([...c.prefix, ...encodeNibbles(raw, c.nibbles)])
+					// Shares cam_gain_direct's wire command/varId ('gain') -- same
+					// "we know the exact landing value" optimistic write as 'direct'.
+					this.setKnobValue('gain', raw)
 				}
 			} else if (c.kind === 'shutter') {
 				a.options = [{ type: 'dropdown', id: 'n', label: 'Shutter speed', default: SHUTTER_SPEEDS[0].n, choices: SHUTTER_SPEEDS.map((s) => ({ id: s.n, label: `1/${s.n}` })) }]
 				a.callback = (ev) => {
 					const raw = SHUTTER_SPEEDS.find((s) => s.n === Number(ev.options.n))?.raw ?? 0
 					this.send([...c.prefix, ...encodeNibbles(raw, c.nibbles)])
+					// Shares cam_shutter_direct's wire command/varId ('shutter').
+					this.setKnobValue('shutter', raw)
 				}
 			}
 			actions[id] = a
@@ -429,6 +511,23 @@ class DctViscaInstance extends InstanceBase {
 		}
 		actions['poll_now'] = { name: 'System: Poll inquiries now', options: [], callback: () => this.pollOnce() }
 		actions['poll_startup_now'] = { name: 'System: Poll startup values now', options: [], callback: () => this.pollStartupOnce() }
+		// Knob-press "set to a fixed value" actions (see KNOB_PRESS_SET_VALUE) --
+		// a plain direct SET to a value we chose ourselves, so (unlike a RUD
+		// reset) there's nothing to confirm via inquiry: write state/knob
+		// straight away.
+		for (const [pid, value] of Object.entries(KNOB_PRESS_SET_VALUE)) {
+			const p = this.paramById[pid]
+			const cmd = COMMANDS[pid]
+			actions[`${pid}_knob_reset`] = {
+				name: `${p.name}: Set to ${value} (knob press)`,
+				options: [],
+				callback: () => {
+					const mask = (1 << (4 * cmd.nibbles)) - 1
+					this.send([...cmd.prefix, ...encodeNibbles(value & mask, cmd.nibbles)])
+					this.setKnobValue(p.varId, value)
+				},
+			}
+		}
 		// wb_temp_measure has no SET side (it's a live, continuously-updated
 		// AWB filter reading, not something you configure) -- so it has no
 		// COMMANDS entry and is invisible to the generic loop above. Fire just
@@ -529,7 +628,10 @@ class DctViscaInstance extends InstanceBase {
 				style: { text: p.name, size: 'auto', color: WHITE, bgcolor: BLUE, png64: KNOB_RING_PNG },
 				steps: [
 					{
-						down: [{ actionId: 'poll_now', options: {} }],
+						down: [
+						KNOB_PRESS_DOWN[p.id] ??
+							(p.id in KNOB_PRESS_SET_VALUE ? { actionId: `${p.id}_knob_reset`, options: {} } : { actionId: 'poll_now', options: {} }),
+					],
 						up: [],
 						rotate_right: [{ actionId: 'adjust', options: { param: p.id, step } }],
 						rotate_left: [{ actionId: 'adjust', options: { param: p.id, step: -step } }],
@@ -590,7 +692,11 @@ class DctViscaInstance extends InstanceBase {
 				callback: (fb) => {
 					const p = this.paramById?.[fb.options.param]
 					if (!p) return {}
-					const v = this.state[p.varId]
+					// Prefer the knob's own running target (same value adjustParam()'s
+					// arithmetic uses) over the possibly-lagging polled this.state --
+					// otherwise the display can show an older, lower number while
+					// polling catches up mid-turn, looking like a spurious step back.
+					const v = this.knob[p.varId] !== undefined ? this.knob[p.varId] : this.state[p.varId]
 					const bar = progressBar(Number(v), p.min, p.max)
 					return { text: `${p.name}\\n${v ?? '--'}\\n${bar}`, size: 'auto' }
 				},
