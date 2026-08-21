@@ -151,13 +151,46 @@ class DctViscaInstance extends InstanceBase {
 		this.knobLockUntil = {} // per-varId: Date.now() ms until which background polling won't resync this.knob (see setKnobValue())
 		this.params = continuousParams()
 		this.paramById = Object.fromEntries(this.params.map((p) => [p.id, p]))
+		this.availableSerialPorts = [] // cached SerialPort.list() entries ({path, vendorId, manufacturer}), for the config editor's Serial port dropdown
 
 		this.setupActions()
 		this.setupFeedbacks()
 		this.setupVariables()
 		this.setupPresets()
+		await this.refreshSerialPorts()
+		this.serialPortScanTimer = setInterval(() => this.refreshSerialPorts(), 5000)
 		await this.initTransport()
 		this.startPolling()
+	}
+
+	// SerialPort.list() enumerates connected devices on both Windows (COMn)
+	// and Linux/macOS (/dev/tty*) via the native bindings -- used to populate
+	// the config editor's Serial port dropdown with only ports that actually
+	// exist, instead of a free-text field the user has to get exactly right.
+	// getConfigFields() can't await this itself (Companion requires it to
+	// return synchronously), so this caches the result on the instance and
+	// re-scans periodically to catch devices plugged in after startup.
+	async refreshSerialPorts() {
+		try {
+			const { SerialPort } = await import('serialport')
+			const ports = await SerialPort.list()
+			this.availableSerialPorts = ports
+				.map((p) => ({ path: p.path, vendorId: p.vendorId, manufacturer: p.manufacturer }))
+				.sort((a, b) => a.path.localeCompare(b.path))
+		} catch (_) {
+			// serialport not installed/available, or listing failed (e.g. permissions)
+			// -- leave whatever list we already had rather than wiping it out.
+		}
+	}
+
+	// USB-to-serial adapters (the actual thing a camera would be attached
+	// through) get a vendorId/manufacturer from the OS; a platform's own
+	// fixed ports (Linux /dev/ttyS0-31, Windows onboard COM1/2) report
+	// neither and show up whether or not anything is wired to them at all.
+	// This is the only cross-platform "is a real device attached" signal
+	// SerialPort.list() offers without opening/probing every port.
+	isSerialAdapterPort(p) {
+		return !!(p.vendorId || p.manufacturer)
 	}
 
 	// --- transport ---------------------------------------------------------
@@ -813,21 +846,59 @@ class DctViscaInstance extends InstanceBase {
 
 	// --- lifecycle ---------------------------------------------------------
 	getConfigFields() {
+		// Companion re-invokes getConfigFields() fresh each time the editor
+		// opens, reading whatever was last saved -- so toggling the checkbox
+		// below takes effect the next time the editor is reopened, not live
+		// as it's clicked (dropdown `choices` can't react to a sibling
+		// field's in-progress edit, only `isVisible` gets the live values).
+		const filterAdapters = this.config?.serialFilterAdapters !== false
+		const filteredPorts = (this.availableSerialPorts ?? []).filter((p) => !filterAdapters || this.isSerialAdapterPort(p))
+		const serialPortChoices = filteredPorts.length ? filteredPorts.map((p) => p.path) : [this.config?.serialPort ?? 'COM3']
 		return [
 			{ type: 'static-text', id: 'info', width: 12, label: 'DCT VISCA', value: 'Raw VISCA over TCP or serial (RS-485/RS-232). For serial, run Companion on the machine wired to the camera.' },
 			{ type: 'dropdown', id: 'conn', label: 'Connection', width: 4, default: 'tcp', choices: [{ id: 'tcp', label: 'TCP' }, { id: 'serial', label: 'Serial (COM)' }] },
 			{ type: 'textinput', id: 'host', label: 'Target IP', width: 5, default: '127.0.0.1', regex: Regex.IP, isVisible: (c) => c.conn !== 'serial' },
 			{ type: 'number', id: 'port', label: 'TCP port', width: 3, default: 4000, min: 1, max: 65535, isVisible: (c) => c.conn !== 'serial' },
-			{ type: 'textinput', id: 'serialPort', label: 'Serial port (e.g. COM3 or /dev/ttyUSB0)', width: 5, default: 'COM3', isVisible: (c) => c.conn === 'serial' },
-			{ type: 'number', id: 'baud', label: 'Baud', width: 3, default: 115200, min: 300, max: 3000000, isVisible: (c) => c.conn === 'serial' },
+			{
+				type: 'dropdown',
+				id: 'serialPort',
+				label: 'Serial port',
+				width: 5,
+				default: serialPortChoices[0],
+				choices: serialPortChoices.map((p) => ({ id: p, label: p })),
+				allowCustom: true,
+				isVisible: (c) => c.conn === 'serial',
+			},
+			{
+				type: 'checkbox',
+				id: 'serialFilterAdapters',
+				label: 'Only show USB serial adapters',
+				width: 3,
+				default: true,
+				isVisible: (c) => c.conn === 'serial',
+			},
+			{ type: 'dropdown', id: 'baud', label: 'Baudrate', width: 3, default: 115200, choices: [{ id: 115200, label: '115200' }, { id: 57600, label: '57600' }], isVisible: (c) => c.conn === 'serial' },
 			{ type: 'number', id: 'address', label: 'Camera address (1-7)', width: 2, default: 1, min: 1, max: 7 },
 			{ type: 'number', id: 'pollInterval', label: 'Poll ms (0=off)', width: 2, default: 0, min: 0, max: 60000 },
-			{ type: 'number', id: 'knobStep', label: 'Knob step (0-255 params)', width: 3, default: 4, min: 1, max: 128 },
+			{ type: 'number', id: 'knobStep', label: 'Knob step (1-255 params)', width: 3, default: 4, min: 1, max: 128 },
 		]
 	}
 
 	async configUpdated(config) {
 		const prev = this.config
+		// The Knob step field's min:1 is a Companion "visual hint only" (per the
+		// SDK's own docs, true of every field's min/max/regex) -- Companion
+		// never actually rejects an entered 0, it just persists it as typed.
+		// knobStep() already falls back to 4 at every use site, so 0 can never
+		// take effect, but correct the saved value too (saveConfig() is a
+		// one-way push to the host, it doesn't re-trigger configUpdated) so the
+		// editor shows 4 next time it's opened instead of silently diverging
+		// from what's actually in use.
+		if (!(Number.isFinite(Number(config.knobStep)) && Number(config.knobStep) > 0)) {
+			this.log('warn', `Knob step must be greater than 0 -- resetting "${config.knobStep}" to 4`)
+			config = { ...config, knobStep: 4 }
+			this.saveConfig(config)
+		}
 		this.config = config
 		// Only tear down/rebuild the actual connection if a connection-relevant
 		// field changed. Reopening a serial port immediately after closing it
@@ -848,6 +919,7 @@ class DctViscaInstance extends InstanceBase {
 
 	async destroy() {
 		this.stopPolling()
+		if (this.serialPortScanTimer) clearInterval(this.serialPortScanTimer)
 		if (this.inflight?.timer) clearTimeout(this.inflight.timer)
 		if (this.socket) this.socket.destroy()
 	}
