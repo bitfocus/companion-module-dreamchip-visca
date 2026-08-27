@@ -149,6 +149,8 @@ class DctViscaInstance extends InstanceBase {
 		this.rxbuf = Buffer.alloc(0)
 		this.knob = {} // per-varId knob target (relative-adjust state)
 		this.knobLockUntil = {} // per-varId: Date.now() ms until which background polling won't resync this.knob (see setKnobValue())
+		this.consecutiveTimeouts = 0 // see markNoReply()/markReplyReceived()
+		this.linkWarning = false // true once we've downgraded Ok -> UnknownWarning for no replies
 		this.params = continuousParams()
 		this.paramById = Object.fromEntries(this.params.map((p) => [p.id, p]))
 		this.availableSerialPorts = [] // cached SerialPort.list() entries ({path, vendorId, manufacturer}), for the config editor's Serial port dropdown
@@ -195,10 +197,39 @@ class DctViscaInstance extends InstanceBase {
 
 	// --- transport ---------------------------------------------------------
 	async initTransport() {
+		this.consecutiveTimeouts = 0
+		this.linkWarning = false
 		if (this.config?.conn === 'serial') {
 			await this.initSerial()
 		} else {
 			this.initTCP()
+		}
+	}
+
+	// A terminal reply (Completion 0x50 or Error 0x60 -- see handleFrame())
+	// proves something is actually answering on the wire. Promotes back to
+	// Ok if markNoReply() had previously downgraded to Warning.
+	markReplyReceived() {
+		this.consecutiveTimeouts = 0
+		if (this.linkWarning) {
+			this.linkWarning = false
+			this.updateStatus(InstanceStatus.Ok)
+		}
+	}
+
+	// pump()'s per-command timeout fires when nothing came back at all. A
+	// serial port can "open" successfully with no adapter/camera on the
+	// other end at all -- a bare UART has no way to detect a peer -- and a
+	// TCP connect is no guarantee either if something else is listening on
+	// that port. Only downgrades while the transport itself still thinks
+	// it's connected, so a real disconnect's own (more specific) status
+	// always wins over this.
+	markNoReply() {
+		if (!this.socket?.isConnected) return
+		this.consecutiveTimeouts++
+		if (this.consecutiveTimeouts >= 2 && !this.linkWarning) {
+			this.linkWarning = true
+			this.updateStatus(InstanceStatus.UnknownWarning, 'No response from camera')
 		}
 	}
 
@@ -317,6 +348,7 @@ class DctViscaInstance extends InstanceBase {
 		const kind = frame[1] & 0xf0
 		// ACK (0x40) is not terminal; Completion/inquiry-reply (0x50) and error (0x60) are.
 		if (kind === 0x50 || kind === 0x60) {
+			this.markReplyReceived()
 			const entry = this.inflight
 			this.inflight = null
 			if (entry?.timer) clearTimeout(entry.timer)
@@ -341,6 +373,7 @@ class DctViscaInstance extends InstanceBase {
 		entry.timer = setTimeout(() => {
 			if (this.inflight === entry) {
 				this.inflight = null
+				this.markNoReply()
 				this.pump()
 			}
 		}, 1500)
@@ -853,7 +886,16 @@ class DctViscaInstance extends InstanceBase {
 		// field's in-progress edit, only `isVisible` gets the live values).
 		const filterAdapters = this.config?.serialFilterAdapters !== false
 		const filteredPorts = (this.availableSerialPorts ?? []).filter((p) => !filterAdapters || this.isSerialAdapterPort(p))
-		const serialPortChoices = filteredPorts.length ? filteredPorts.map((p) => p.path) : [this.config?.serialPort ?? 'COM3']
+		// The one-and-only fallback for "nothing was scanned" needs to actually
+		// look like a path on THIS platform -- otherwise a connection created
+		// (or last saved) on Windows shows a stray "COM3" as if it were a live
+		// port on a Linux box that's never had a COM3 in its life, and vice
+		// versa for a Linux path leaking into a Windows config.
+		const isPlausiblePortPath = (path) => (process.platform === 'win32' ? /^COM\d+$/i.test(path) : path.startsWith('/dev/'))
+		const platformDefaultPort = process.platform === 'win32' ? 'COM3' : '/dev/ttyUSB0'
+		const savedPort = this.config?.serialPort
+		const fallbackPort = savedPort && isPlausiblePortPath(savedPort) ? savedPort : platformDefaultPort
+		const serialPortChoices = filteredPorts.length ? filteredPorts.map((p) => p.path) : [fallbackPort]
 		return [
 			{ type: 'static-text', id: 'info', width: 12, label: 'DCT VISCA', value: 'Raw VISCA over TCP or serial (RS-485/RS-232). For serial, run Companion on the machine wired to the camera.' },
 			{ type: 'dropdown', id: 'conn', label: 'Connection', width: 4, default: 'tcp', choices: [{ id: 'tcp', label: 'TCP' }, { id: 'serial', label: 'Serial (COM)' }] },
