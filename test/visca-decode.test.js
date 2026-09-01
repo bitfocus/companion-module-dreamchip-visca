@@ -80,7 +80,7 @@ test('a Shutter (Speed) send is indistinguishable on the wire from Shutter (dire
 test('DCT-ext wb_temp SET translates to wb_temp <kelvin>, 4-nibble, no scaling', () => {
 	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x0b, ...encodeNibbles(5000, 4)])))
 	assert.equal(entries.length, 1)
-	assert.match(entries[0].companion, /Color Temp \(Kelvin\) = 5000/)
+	assert.match(entries[0].companion, /Color Temp = 5000/)
 	assert.equal(entries[0].provideo, 'wb_temp 5000')
 })
 
@@ -299,7 +299,7 @@ test('cam_lr_reverse and cam_picture_flip (0x61/0x66) are not decoded -- cam_fli
 
 test('color_temp_direct is a raw wb_preset index passthrough, not a Kelvin value', () => {
 	const entries = decodeDump(parseLines(tx([0x01, 0x04, 0x20, 0x00, 0x00, ...encodeNibbles(3, 2)])))
-	assert.match(entries[0].companion, /Color Temp \(direct\) = 3/)
+	assert.match(entries[0].companion, /Color Temp Preset \(direct\) = 3/)
 	assert.equal(entries[0].provideo, 'wb_preset 3')
 })
 

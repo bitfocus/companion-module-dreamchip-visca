@@ -90,6 +90,15 @@ export function isoToGainRaw(iso) {
 // drift from the formula.
 export const GAIN_ISO_STEPS = [140, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400]
 export const GAIN_ISO = GAIN_ISO_STEPS.map((iso) => ({ iso, raw: isoToGainRaw(iso) }))
+// Inverse of isoToGainRaw()'s underlying map_gain() -- for DISPLAYING the
+// Gain (direct) knob's current raw value as an ISO number (the knob still
+// steps in raw units; only the shown text changes). Ordinary rounding is
+// fine here (unlike isoToGainRaw() above): we're going raw -> real -> ISO,
+// not back through the firmware's own truncating raw(ISO) inverse.
+export function gainRawToIso(raw) {
+	const real = GAIN_REAL_MIN + Math.trunc((raw * (GAIN_REAL_MAX - GAIN_REAL_MIN)) / GAIN_RAW_MAX)
+	return Math.round((real / 1000) * GAIN_ISO_MIN)
+}
 
 // --- Shutter (Speed) named-step table ---------------------------------------
 // cam_exposure's wire value is a raw 3-nibble 0-4095 that the firmware
@@ -120,6 +129,49 @@ export const SHUTTER_SPEEDS = SHUTTER_SPEED_STEPS.map((n) => {
 	const us = Math.round(1e6 / n)
 	return { n, us, raw: shutterUsToRaw(us) }
 })
+// Inverse of shutterUsToRaw()'s underlying map_exposure() -- for DISPLAYING
+// the Shutter (direct) knob's current raw value in microseconds.
+export function shutterRawToUs(raw) {
+	return SHUTTER_REAL_MIN + Math.trunc((raw * (SHUTTER_REAL_MAX - SHUTTER_REAL_MIN)) / SHUTTER_RAW_MAX)
+}
+
+// --- other knob display formatters (raw wire value -> human-readable text) -
+// Audio Gain's wire value is a raw 3-nibble 0-4095 that the firmware scales
+// ×16 onto a 4.12 fixed-point real amplitude (real=4096 -> 1.0x/0dB unity);
+// dB = 20*log10(ratio).
+const AUDIO_GAIN_UNITY_REAL = 4096
+// Numeric dB (not the display string below) -- also used to position the
+// knob's progress bar on a dB scale instead of the raw wire value, so 0dB
+// sits at the visual center of the bar (see AUDIO_GAIN_BAR_MIN/MAX) instead
+// of near the left edge (raw=256/4095 is only ~6% of the way across).
+export function audioGainRawToDbValue(raw) {
+	const real = raw * 16
+	return 20 * Math.log10(real / AUDIO_GAIN_UNITY_REAL)
+}
+export function audioGainRawToDb(raw) {
+	return audioGainRawToDbValue(raw).toFixed(1)
+}
+// Symmetric dB window for the progress bar ONLY (not the selectable range --
+// raw is still 0-4095/0..~24.08dB): a floor mirroring the real +24.08dB
+// ceiling, so 0dB (raw=256, the knob-reset default) renders at the bar's
+// midpoint. Values below the floor (very low raw, including -Infinity at
+// raw=0) just clamp to the bar's left edge.
+export const AUDIO_GAIN_BAR_MAX = 24.08
+export const AUDIO_GAIN_BAR_MIN = -AUDIO_GAIN_BAR_MAX
+// post_hue's raw wire value is 128/90 counts per degree (see cam_color_hue_direct);
+// inverse: degrees = raw * 90/128.
+export function hueRawToDeg(raw) {
+	return ((raw * 90) / 128).toFixed(1)
+}
+// Red/Blue/Green Gain are FP4.8-style, unity gain = 256 raw.
+export function wbGainFactor(raw) {
+	return (raw / 256).toFixed(2)
+}
+// Color Gain (post_sat/saturation) unity = 128 raw (a different unit than the
+// WB channel gains above, despite the similar "gain" name).
+export function saturationFactor(raw) {
+	return (raw / 128).toFixed(2)
+}
 
 // --- codec (ported from visca_frame.py) ------------------------------------
 export function encodeNibbles(value, n) {
@@ -208,7 +260,7 @@ export const COMMANDS = {
 	// stops/dB (logarithmic), not linear raw units -- trying it here too.
 	// `step` is irrelevant under logScale (adjustParam() only uses its sign),
 	// so it's dropped in favor of stepPercent.
-	cam_gain_direct: { name: 'Gain (direct)', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00), nibbles: 3, logScale: true, stepPercent: 5, minStep: 4 },
+	cam_gain_direct: { name: 'Gain (direct)', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00), nibbles: 3, logScale: true, stepPercent: 5, minStep: 4, format: (raw) => `ISO ${gainRawToIso(raw)}` },
 	// Gain (ISO): a curated dropdown of named third-stop ISO values (OG03A10
 	// sensor) that map to the SAME wire command as cam_gain_direct (01 04 4C
 	// ...) via the GAIN_ISO table above. Purely additive -- the raw
@@ -221,7 +273,18 @@ export const COMMANDS = {
 	cam_shutter: { name: 'Shutter', group: 'Exposure', kind: 'rud', func: 0x0a },
 	// cam_exposure's real range is 100-38339us (observed on real hardware);
 	// widened to 3 nibbles (0-4095) for ~9.3us per step, matching the BSP.
-	cam_shutter_direct: { name: 'Shutter (direct)', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x04, 0x4a, 0x00, 0x00), nibbles: 3 },
+	// logScale (like Gain above): shutter speed is perceived/graded in stops,
+	// not linear microseconds. `min` floors the fastest selectable manual
+	// shutter at 200us (project decision), computed from shutterUsToRaw() so
+	// it can never drift from the real<->raw formula above -- +1 because
+	// shutterUsToRaw() truncates DOWN, so the raw for exactly 200us actually
+	// maps back to ~193us (faster than the requested floor); the next raw up
+	// is the first one that's truly >=200us.
+	cam_shutter_direct: {
+		name: 'Shutter (direct)', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x04, 0x4a, 0x00, 0x00), nibbles: 3,
+		logScale: true, stepPercent: 5, minStep: 4, min: shutterUsToRaw(200) + 1,
+		format: (raw) => `${shutterRawToUs(raw)} µs`,
+	},
 	// Shutter (Speed): a curated dropdown of named 1/n shutter speeds that map
 	// to the SAME wire command as cam_shutter_direct (01 04 4A ...) via the
 	// SHUTTER_SPEEDS table above. Purely additive -- the raw cam_shutter_direct
@@ -249,17 +312,17 @@ export const COMMANDS = {
 	cam_rgain: { name: 'Red Gain', group: 'White Balance', kind: 'rud', func: 0x03 },
 	// gain_red's real range is 0-4095 (ISP_AWB_GAIN_MAX); widened to 3 nibbles
 	// so the wire encoding represents it exactly, matching the BSP fix.
-	cam_rgain_direct: { name: 'Red Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x43, 0x00, 0x00), nibbles: 3 },
+	cam_rgain_direct: { name: 'Red Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x43, 0x00, 0x00), nibbles: 3, format: (raw) => `${wbGainFactor(raw)}x` },
 	cam_bgain: { name: 'Blue Gain', group: 'White Balance', kind: 'rud', func: 0x04 },
 	// gain_blue's real range is 0-4095 (ISP_AWB_GAIN_MAX); widened to 3 nibbles.
-	cam_bgain_direct: { name: 'Blue Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x44, 0x00, 0x00), nibbles: 3 },
+	cam_bgain_direct: { name: 'Blue Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x44, 0x00, 0x00), nibbles: 3, format: (raw) => `${wbGainFactor(raw)}x` },
 	// post_sat's real range is 0-255 (ISP_CCOR12_SATURATION_MAX in the BSP); the
 	// VISCA wire format is widened to 2 nibbles to match, in step with the same
 	// fix in visca_map_picture.c.
-	cam_color_gain_direct: { name: 'Color Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x49, 0x00, 0x00), nibbles: 2 },
+	cam_color_gain_direct: { name: 'Color Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x49, 0x00, 0x00), nibbles: 2, format: (raw) => `${saturationFactor(raw)}x` },
 	// post_hue's real range is signed -128..127 (ISP_CCOR12_HUE_MIN/MAX); wire
 	// format widened from 1 nibble (unsigned 0-15, couldn't go negative at all).
-	cam_color_hue_direct: { name: 'Color Hue (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x4f, 0x00, 0x00), nibbles: 2, signed: true },
+	cam_color_hue_direct: { name: 'Color Hue (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x4f, 0x00, 0x00), nibbles: 2, signed: true, format: (raw) => `${hueRawToDeg(raw)}°` },
 	// wb_preset's calibration-profile presets each have a real Kelvin rating,
 	// but there's no way to query which preset is currently active -- so this
 	// is a raw preset-index passthrough with no Kelvin matching
@@ -271,7 +334,7 @@ export const COMMANDS = {
 	// is the real usable range across profiles, not the wire's full 0-4095.
 	// Distinct from dct_wb_temp below, which DOES set a real settable Kelvin
 	// value (via the wb_temp ProVideo command).
-	color_temp_direct: { name: 'Color Temp (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x20, 0x00, 0x00), nibbles: 2, min: 0, max: 9 },
+	color_temp_direct: { name: 'Color Temp Preset (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x20, 0x00, 0x00), nibbles: 2, min: 0, max: 9 },
 	// wb_temp sets the whitepoint by target Kelvin (do_wb_temp ->
 	// apply_color_temperature). The true min/max are queried live per-sensor
 	// (get_color_temperature_range), but the UI range is hardcoded to the
@@ -287,7 +350,7 @@ export const COMMANDS = {
 	// step: 50 overrides the generic knob preset's default step (main.js's
 	// global `knobStep` config, meant for small/raw-range params) -- this
 	// range spans 7800 real Kelvin, so that default is imperceptibly fine.
-	dct_wb_temp: { name: 'Color Temp (Kelvin)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x0b), nibbles: 4, min: 2200, max: 10000, step: 50 },
+	dct_wb_temp: { name: 'Color Temp', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x0b), nibbles: 4, min: 2200, max: 10000, step: 50, format: (raw) => `${raw} K` },
 
 	// Picture
 	cam_gamma: {
@@ -327,7 +390,7 @@ export const COMMANDS = {
 		choices: { Reset: P(0x01, 0x7e, 0x01, 0x01, 0x00), Up: P(0x01, 0x7e, 0x01, 0x01, 0x02), Down: P(0x01, 0x7e, 0x01, 0x01, 0x03) },
 	},
 	// gain_green's real range is 0-4095 (ISP_AWB_GAIN_MAX); widened to 3 nibbles.
-	dct_ggain_direct: { name: 'Green Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x01, 0x00, 0x00), nibbles: 3 },
+	dct_ggain_direct: { name: 'Green Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x01, 0x00, 0x00), nibbles: 3, format: (raw) => `${wbGainFactor(raw)}x` },
 	dct_gain_mode: {
 		name: 'Gain Mode', group: 'Exposure', kind: 'enum',
 		choices: { Auto: P(0x01, 0x7e, 0x01, 0x02, 0x00), LCG: P(0x01, 0x7e, 0x01, 0x02, 0x01), HCG: P(0x01, 0x7e, 0x01, 0x02, 0x02) },
@@ -369,6 +432,18 @@ export const COMMANDS = {
 	// -EOPNOTSUPP); `max` narrows the Companion-side UI/knob range from the
 	// wire's full 1-nibble 0-15 capacity.
 	dct_color_space: { name: 'Color Space', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x17), nibbles: 1, min: 0, max: 2 },
+	// Color Space: 3 individual per-choice buttons for the SAME wire command
+	// as dct_color_space above -- purely additive, same pattern as Gain
+	// (ISO)/Shutter (Speed); the raw Color Space (direct) number-input stays
+	// for manual entry.
+	dct_color_space_preset: {
+		name: 'Color Space', group: 'System', kind: 'enum',
+		choices: {
+			'Rec.709': P(0x01, 0x7e, 0x01, 0x17, 0x00),
+			'Rec.2020': P(0x01, 0x7e, 0x01, 0x17, 0x01),
+			'S-Gamut3.Cine': P(0x01, 0x7e, 0x01, 0x17, 0x02),
+		},
+	},
 	// dct_tm_mode (tm_mode, SS 0x21) is intentionally NOT exposed: do_tm_mode's
 	// own "off" (0) path is marked "a hack to have something for the NAB"
 	// (product/src/cmd_tm.c) and does not reliably disable tone mapping on
@@ -424,7 +499,20 @@ export const COMMANDS = {
 	// increment feels huge near the bottom of the range and imperceptible
 	// near the top. adjustParam() (main.js) multiplies/divides by
 	// (1 + stepPercent/100) per knob turn instead of adding a flat step.
-	dct_audio_gain: { name: 'Audio Gain', group: 'Audio', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x66), nibbles: 3, logScale: true, stepPercent: 5 },
+	// stepPercent is tuned to exactly one 0.5dB step per knob click, not the
+	// generic 5%: a fixed dB step IS a fixed log-domain percentage step
+	// (10^(dB/20) - 1), so this reuses the existing logScale/stepPercent
+	// mechanism precisely rather than inventing a second stepping algorithm.
+	// Range is whatever raw 0-4095 already produces -- 0 to ~24.08dB (the
+	// hardware's real ceiling; NOT 42dB, see audioGainRawToDb()).
+	dct_audio_gain: {
+		name: 'Audio Gain', group: 'Audio', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x66), nibbles: 3,
+		logScale: true, stepPercent: (10 ** (0.5 / 20) - 1) * 100,
+		format: (raw) => `${audioGainRawToDb(raw)} dB`,
+		// Progress-bar position uses the dB scale (barValue/barMin/barMax),
+		// not the raw wire value -- see AUDIO_GAIN_BAR_MIN/MAX above.
+		barValue: audioGainRawToDbValue, barMin: AUDIO_GAIN_BAR_MIN, barMax: AUDIO_GAIN_BAR_MAX,
+	},
 
 	// --- AEC (auto exposure control) individual fields ------------------------
 	// aec's real signature is "aec <enable> <setPoint> <speed> <clmTolerance>
@@ -472,7 +560,7 @@ export const INQUIRIES = {
 	wb_mode: { name: 'WB Mode', varId: 'wb_mode', payload: P(0x09, 0x04, 0x35), decode: { type: 'enum', map: ENUM.wb } },
 	rgain: { name: 'R Gain', varId: 'rgain', payload: P(0x09, 0x04, 0x43), decode: { type: 'value' } },
 	bgain: { name: 'Blue Gain', varId: 'bgain', payload: P(0x09, 0x04, 0x44), decode: { type: 'value' } },
-	color_temp: { name: 'Color Temp', varId: 'color_temp', payload: P(0x09, 0x04, 0x20), decode: { type: 'value' } },
+	color_temp: { name: 'Color Temp Preset', varId: 'color_temp', payload: P(0x09, 0x04, 0x20), decode: { type: 'value' } },
 	// The three fields of "wb_temp"'s bare dump ("<current> <min> <max>"),
 	// each its own VISCA round-trip disambiguated by a selector byte
 	// (payload's last byte: 0/1/2) -- see COMMANDS.dct_wb_temp.
@@ -576,6 +664,10 @@ export function continuousParams() {
 				logScale: !!c.logScale,
 				stepPercent: c.stepPercent,
 				minStep: c.minStep,
+				format: c.format,
+				barValue: c.barValue,
+				barMin: c.barMin,
+				barMax: c.barMax,
 			}
 		})
 }

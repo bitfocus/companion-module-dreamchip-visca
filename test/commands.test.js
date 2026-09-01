@@ -20,6 +20,15 @@ import {
 	SHUTTER_SPEEDS,
 	SHUTTER_SPEED_STEPS,
 	shutterUsToRaw,
+	gainRawToIso,
+	shutterRawToUs,
+	audioGainRawToDb,
+	audioGainRawToDbValue,
+	AUDIO_GAIN_BAR_MIN,
+	AUDIO_GAIN_BAR_MAX,
+	hueRawToDeg,
+	wbGainFactor,
+	saturationFactor,
 	progressBar,
 	RUD,
 	TERMINATOR,
@@ -335,8 +344,19 @@ test('the wb_temp knob param reads back the current inquiry (varId dct_wb_temp) 
 
 test('color_temp_direct remains a distinct raw preset-index passthrough alongside the new settable dct_wb_temp', () => {
 	assert.ok(COMMANDS.dct_wb_temp, 'dct_wb_temp SET exists')
-	assert.equal(COMMANDS.color_temp_direct.name, 'Color Temp (direct)')
+	assert.equal(COMMANDS.color_temp_direct.name, 'Color Temp Preset (direct)')
 	assert.equal(COMMANDS.color_temp_direct.max, 9)
+})
+
+test('dct_wb_temp owns the bare "Color Temp" name; color_temp_direct/color_temp are disambiguated as "Color Temp Preset" to avoid colliding with it', () => {
+	assert.equal(COMMANDS.dct_wb_temp.name, 'Color Temp')
+	assert.equal(continuousParams().find((x) => x.id === 'dct_wb_temp').name, 'Color Temp')
+	// color_temp_direct's knob/button label (after continuousParams() strips
+	// the trailing " (direct)") must NOT collapse back down to bare "Color
+	// Temp" -- that's the exact collision this naming was chosen to avoid.
+	const preset = continuousParams().find((x) => x.id === 'color_temp_direct')
+	assert.equal(preset.name, 'Color Temp Preset')
+	assert.equal(INQUIRIES.color_temp.name, 'Color Temp Preset')
 })
 
 test('RUD action bytes', () => {
@@ -710,6 +730,21 @@ test("continuousParams' Color Space entry is narrowed to 0-2 (do_color_space har
 	assert.equal(p.max, 2)
 })
 
+test('Color Space Preset (dct_color_space_preset) sends the exact confirmed-working wire frame for each of the 3 choices', () => {
+	const c = COMMANDS.dct_color_space_preset
+	assert.equal(c.kind, 'enum')
+	assert.deepEqual(Object.keys(c.choices), ['Rec.709', 'Rec.2020', 'S-Gamut3.Cine'])
+	// raw hardware confirmation: 81 01 7e 01 17 00 ff -> ACK+Completion (not the
+	// earlier-reported 90 61 41 ff error, which turned out to be unrelated to
+	// the VISCA mapping itself -- see the color_space investigation).
+	assert.deepEqual([...buildFrame(1, c.choices['Rec.709'])], [0x81, 0x01, 0x7e, 0x01, 0x17, 0x00, 0xff])
+	assert.deepEqual([...buildFrame(1, c.choices['Rec.2020'])], [0x81, 0x01, 0x7e, 0x01, 0x17, 0x01, 0xff])
+	assert.deepEqual([...buildFrame(1, c.choices['S-Gamut3.Cine'])], [0x81, 0x01, 0x7e, 0x01, 0x17, 0x02, 0xff])
+	// same underlying wire command as the raw Color Space (direct) entry --
+	// purely additive, both stay independently usable.
+	assert.deepEqual(c.choices['Rec.709'].slice(0, 4), COMMANDS.dct_color_space.prefix)
+})
+
 test("continuousParams' LUT Mode entry is narrowed to 0-1 (LUT_MODE_FIXED=2 is rejected), not the wire's full 0-15", () => {
 	const p = continuousParams().find((x) => x.id === 'dct_lut_mode')
 	assert.equal(p.min, 0)
@@ -769,10 +804,10 @@ test('Audio Enable and Audio Gain are grouped under Audio (not System)', () => {
 	assert.equal(COMMANDS.dct_audio_gain.group, 'Audio')
 })
 
-test("continuousParams' Audio Gain entry is logScale (perceived audio level is logarithmic, not linear)", () => {
+test("continuousParams' Audio Gain entry is logScale, stepped in exact 0.5dB increments (not linear or the generic 5%)", () => {
 	const p = continuousParams().find((x) => x.id === 'dct_audio_gain')
 	assert.equal(p.logScale, true)
-	assert.equal(p.stepPercent, 5)
+	assert.ok(Math.abs(p.stepPercent - (10 ** (0.5 / 20) - 1) * 100) < 1e-9)
 	assert.equal(p.min, 0)
 	assert.equal(p.max, 4095)
 })
@@ -824,4 +859,94 @@ test('Gain/Shutter/AE/WB/RGB-gain/Green-gain/Bright/Contrast/Color-Gain-Hue/Time
 	]) {
 		assert.ok(!INQUIRIES[id].once, `${id} should not be tagged once:true`)
 	}
+})
+
+// --- knob display formatters (raw wire value -> human-readable text) ------
+
+test('gainRawToIso is the inverse of the map_gain() real-gain formula, in ISO units', () => {
+	// raw 0 -> real 1000 -> ISO 140 (the OG03A10 1x/0dB floor)
+	assert.equal(gainRawToIso(0), 140)
+	// raw 4095 -> real 45715 -> ISO 6400 (exact top of the curated table)
+	assert.equal(gainRawToIso(4095), 6400)
+	// raw->ISO->raw isn't lossless (truncating integer division both ways,
+	// same caveat as shutterRawToUs below) -- for every curated ISO step,
+	// gainRawToIso(its raw) must land within 2 ISO of the original.
+	for (const { iso, raw } of GAIN_ISO) {
+		assert.ok(Math.abs(gainRawToIso(raw) - iso) <= 2, `ISO ${iso}: raw ${raw} -> ${gainRawToIso(raw)}`)
+	}
+})
+
+test('shutterRawToUs is the inverse of the map_exposure() real-exposure formula, in microseconds', () => {
+	assert.equal(shutterRawToUs(0), 100)
+	assert.equal(shutterRawToUs(4095), 38339)
+	SHUTTER_SPEEDS.forEach(({ us, raw }, i) => {
+		// us->raw->us isn't lossless (truncating integer division), but the
+		// round trip must land within one raw step's worth of microseconds.
+		assert.ok(Math.abs(shutterRawToUs(raw) - us) <= 10, `1/${SHUTTER_SPEED_STEPS[i]}`)
+	})
+})
+
+test('cam_shutter_direct is logScale and floors the fastest manual shutter at >=200us', () => {
+	const p = continuousParams().find((x) => x.id === 'cam_shutter_direct')
+	assert.equal(p.logScale, true)
+	// shutterUsToRaw(200) truncates down to a raw that's actually ~193us
+	// (faster than the floor); the command adds +1 to guarantee >=200us.
+	assert.equal(p.min, shutterUsToRaw(200) + 1)
+	assert.equal(shutterRawToUs(p.min) >= 200, true)
+	assert.ok(shutterRawToUs(p.min) < 210, 'the 200us floor should not be padded far past 200us')
+})
+
+test('audioGainRawToDb: raw 256 (the knob-reset default) is 0dB unity, raw 4095 is the real hardware max (~24dB, not 42)', () => {
+	assert.equal(audioGainRawToDb(256), '0.0')
+	const maxDb = Number(audioGainRawToDb(4095))
+	assert.ok(maxDb > 24.0 && maxDb < 24.2, `expected ~24.08dB, got ${maxDb}`)
+})
+
+test("dct_audio_gain's bar range is symmetric around 0dB, so the knob-reset default (raw 256/0dB) sits at the visual center", () => {
+	const p = continuousParams().find((x) => x.id === 'dct_audio_gain')
+	assert.equal(typeof p.barValue, 'function')
+	assert.equal(p.barMin, -p.barMax, 'bar range must be symmetric around 0')
+	assert.equal(p.barValue(256), 0)
+	assert.equal(p.barMax, AUDIO_GAIN_BAR_MAX)
+	assert.equal(p.barMin, AUDIO_GAIN_BAR_MIN)
+	assert.equal(audioGainRawToDbValue(256), 0)
+	assert.equal(audioGainRawToDbValue(4095).toFixed(2), '24.08')
+	// raw=0 is true silence -- -Infinity dB, not a finite bar position.
+	assert.equal(audioGainRawToDbValue(0), -Infinity)
+})
+
+test("Audio Gain's stepPercent is tuned to exactly one 0.5dB step, not the generic 5%", () => {
+	const p = continuousParams().find((x) => x.id === 'dct_audio_gain')
+	const factor = 1 + p.stepPercent / 100
+	const dbPerStep = 20 * Math.log10(factor)
+	assert.ok(Math.abs(dbPerStep - 0.5) < 1e-9, `expected exactly 0.5dB/step, got ${dbPerStep}`)
+})
+
+test('hueRawToDeg inverts the user-supplied degrees->raw example (22.1° -> raw 31)', () => {
+	// user's own worked example: hue=22.1° -> h=22.1*128/90=31.43.. -> round -> 31
+	assert.equal(hueRawToDeg(31), (31 * 90 / 128).toFixed(1))
+	assert.equal(Number(hueRawToDeg(31)), 21.8) // round-trip lands close to, not exactly, 22.1 (integer raw quantization)
+})
+
+test('wbGainFactor/saturationFactor render unity gain (raw=256/128) as 1.00', () => {
+	assert.equal(wbGainFactor(256), '1.00')
+	assert.equal(wbGainFactor(512), '2.00')
+	assert.equal(saturationFactor(128), '1.00')
+	assert.equal(saturationFactor(64), '0.50')
+})
+
+test('every knob-backed param with a format() renders a non-empty string for its min and max', () => {
+	for (const p of continuousParams()) {
+		if (!p.format) continue
+		assert.equal(typeof p.format(p.min), 'string', `${p.id} format(min)`)
+		assert.equal(typeof p.format(p.max), 'string', `${p.id} format(max)`)
+		assert.ok(p.format(p.min).length > 0, `${p.id} format(min) non-empty`)
+	}
+})
+
+// --- AE/WB Auto/Manual toggles (mirrors the SDI/Timecode/Audio toggle trio) -
+
+test('cam_ae/cam_wb are still full multi-choice enums (the new toggle only ever targets Auto/Manual)', () => {
+	assert.deepEqual(Object.keys(COMMANDS.cam_ae.choices), ['Auto', 'Manual', 'Shutter Pri'])
+	assert.deepEqual(Object.keys(COMMANDS.cam_wb.choices), ['Auto', 'Indoor', 'Outdoor', 'Manual', 'Trigger'])
 })

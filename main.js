@@ -58,12 +58,17 @@ const PRESET_BGCOLOR_OVERRIDES = {
 const RUD_INQUIRY_ID = { cam_gain: 'gain', cam_shutter: 'shutter', cam_rgain: 'rgain', cam_bgain: 'bgain', cam_bright: 'bright' }
 
 // enum COMMANDS ids whose plain per-choice buttons (not just their dedicated
-// toggle action) should also confirmIfNotPolling() after sending -- these 3
+// toggle action) should also confirmIfNotPolling() after sending -- these
 // stayed on the continuous poll tier specifically so their toggle buttons'
 // live status stays accurate; the plain "SDI Range: Legal"/"Audio Enable:
-// On"/"Timecode: Run"-style buttons set the exact same value, so they need
-// the same confirmation when auto poll is off.
-const CONFIRM_POLL_ENUM_IDS = new Set(['dct_sdi_range', 'dct_timecode_hold', 'dct_audio_enable'])
+// On"/"Timecode: Run"/"AE: Auto"/"WB: Manual"-style buttons set the exact
+// same value, so they need the same confirmation when auto poll is off.
+const CONFIRM_POLL_ENUM_IDS = new Set(['dct_sdi_range', 'dct_timecode_hold', 'dct_audio_enable', 'cam_ae', 'cam_wb'])
+// CONFIRM_POLL_ENUM_IDS is keyed by COMMANDS id (what the generic enum
+// callback below has in scope), but confirmIfNotPolling() needs an INQUIRIES
+// id -- for dct_sdi_range/dct_timecode_hold/dct_audio_enable those are the
+// same string, but cam_ae/cam_wb's inquiries are named ae_mode/wb_mode.
+const CONFIRM_POLL_INQUIRY_ID = { cam_ae: 'ae_mode', cam_wb: 'wb_mode' }
 
 // dct_ggain (kind:'enum', choices Reset/Up/Down) is semantically a RUD-style
 // gain_green control -- it just uses DCT-extension byte payloads instead of
@@ -72,6 +77,17 @@ const CONFIRM_POLL_ENUM_IDS = new Set(['dct_sdi_range', 'dct_timecode_hold', 'dc
 // confirm+resync treatment as cam_rgain/cam_bgain (below), which it otherwise
 // wouldn't get at all.
 const ENUM_RUD_INQUIRY_ID = { dct_ggain: 'dct_ggain' }
+
+// The firmware itself forces AE/AWB into Manual as a side effect of setting
+// these varIds (ae_ensure_manual()/visca_wb_ensure_manual() in the BSP's
+// VISCA layer -- same "the auto algorithm would silently overwrite this on
+// the next frame otherwise" reasoning for both), but nothing on the Companion
+// side otherwise knows that happened -- the AE/WB toggle buttons would keep
+// showing stale AUTO until the next full poll cycle (or forever, with
+// polling off). Re-confirm the affected mode right after any of these varIds
+// is deliberately written (see setKnobValue() and applyInquiryReply()'s
+// resyncKnob branch below).
+const MODE_SIDE_EFFECT_INQUIRY = { gain: 'ae_mode', shutter: 'ae_mode', rgain: 'wb_mode', bgain: 'wb_mode', dct_ggain: 'wb_mode', dct_wb_temp: 'wb_mode' }
 
 // Knobs whose real command already has a proper RUD "Reset" (server-side
 // target, confirmed via RUD_INQUIRY_ID's unconditional resyncKnob confirm-
@@ -408,8 +424,15 @@ class DctViscaInstance extends InstanceBase {
 			const locked = (this.knobLockUntil[q.varId] ?? 0) > Date.now()
 			if (Number.isFinite(n) && (opts.resyncKnob || !locked)) this.knob[q.varId] = n
 		}
-		if (q.varId === 'ae_mode') this.checkFeedbacks('ae_mode_is')
-		if (q.varId === 'wb_mode') this.checkFeedbacks('wb_mode_is')
+		// Same AE/AWB-forced-manual side effect as setKnobValue() -- this
+		// covers the RUD/enum confirm-read path (Gain/Shutter/Red/Blue/Green
+		// Gain Reset/Up/Down), which never calls setKnobValue() itself.
+		// resyncKnob-gated for the same reason as the knob resync above: only
+		// a deliberate confirm-read, never a routine background poll of
+		// gain/shutter/rgain/bgain/dct_ggain themselves.
+		if (opts.resyncKnob && MODE_SIDE_EFFECT_INQUIRY[q.varId]) this.confirmIfNotPolling(MODE_SIDE_EFFECT_INQUIRY[q.varId])
+		if (q.varId === 'ae_mode') this.checkFeedbacks('ae_mode_is', 'cam_ae_display')
+		if (q.varId === 'wb_mode') this.checkFeedbacks('wb_mode_is', 'cam_wb_display')
 		if (q.varId === 'dct_audio_enable') this.checkFeedbacks('dct_audio_enable_is', 'dct_audio_enable_display')
 		if (q.varId === 'dct_sdi_range') this.checkFeedbacks('dct_sdi_range_is', 'dct_sdi_range_display')
 		if (q.varId === 'dct_timecode_hold') this.checkFeedbacks('dct_timecode_hold_display')
@@ -456,6 +479,8 @@ class DctViscaInstance extends InstanceBase {
 		this.setVariableValues({ [varId]: String(value) })
 		this.knobLockUntil[varId] = Date.now() + KNOB_LOCK_MS
 		this.checkFeedbacks('knob_value')
+		const modeId = MODE_SIDE_EFFECT_INQUIRY[varId]
+		if (modeId) this.confirmIfNotPolling(modeId)
 	}
 
 	// Rotary-knob adjust: clamp, send an absolute `direct` set for the param, and
@@ -501,7 +526,7 @@ class DctViscaInstance extends InstanceBase {
 				a.options = [{ type: 'dropdown', id: 'choice', label: c.name, default: ids[0], choices: ids.map((x) => ({ id: x, label: x })) }]
 				a.callback = (ev) => {
 					this.send(c.choices[ev.options.choice])
-					if (CONFIRM_POLL_ENUM_IDS.has(id)) this.confirmIfNotPolling(id)
+					if (CONFIRM_POLL_ENUM_IDS.has(id)) this.confirmIfNotPolling(CONFIRM_POLL_INQUIRY_ID[id] ?? id)
 					const rudQId = ENUM_RUD_INQUIRY_ID[id]
 					if (rudQId) this.inquireOnce(rudQId, { resyncKnob: true })
 				}
@@ -643,6 +668,35 @@ class DctViscaInstance extends InstanceBase {
 				this.confirmIfNotPolling('dct_timecode_hold')
 			},
 		}
+		// AE/WB are genuinely 3-/5-choice enums (cam_ae, cam_wb above), unlike
+		// the strictly-binary toggles above -- these two additional toggles
+		// only ever flip between Auto and Manual (ignoring Shutter Pri /
+		// Indoor / Outdoor / Trigger, all still reachable via their own
+		// existing per-choice buttons).
+		actions['cam_ae_toggle'] = {
+			name: 'AE: Toggle Auto/Manual',
+			options: [],
+			callback: () => {
+				const goManual = this.state.ae_mode !== 'Manual'
+				this.send(COMMANDS.cam_ae.choices[goManual ? 'Manual' : 'Auto'])
+				this.state.ae_mode = goManual ? 'Manual' : 'Auto'
+				this.setVariableValues({ ae_mode: this.state.ae_mode })
+				this.checkFeedbacks('ae_mode_is', 'cam_ae_display')
+				this.confirmIfNotPolling('ae_mode')
+			},
+		}
+		actions['cam_wb_toggle'] = {
+			name: 'WB: Toggle Auto/Manual',
+			options: [],
+			callback: () => {
+				const goManual = this.state.wb_mode !== 'Manual'
+				this.send(COMMANDS.cam_wb.choices[goManual ? 'Manual' : 'Auto'])
+				this.state.wb_mode = goManual ? 'Manual' : 'Auto'
+				this.setVariableValues({ wb_mode: this.state.wb_mode })
+				this.checkFeedbacks('wb_mode_is', 'cam_wb_display')
+				this.confirmIfNotPolling('wb_mode')
+			},
+		}
 		this.setActionDefinitions(actions)
 	}
 
@@ -718,6 +772,12 @@ class DctViscaInstance extends InstanceBase {
 		presets['timecode_hold_toggle'] = btn('System', 'Timecode: Toggle Run/Hold', 'TC\\n--', 'dct_timecode_hold_toggle', {}, [
 			{ feedbackId: 'dct_timecode_hold_display', options: {} },
 		])
+		presets['cam_ae_toggle'] = btn('Exposure', 'AE: Toggle Auto/Manual', 'AE\\n--', 'cam_ae_toggle', {}, [
+			{ feedbackId: 'cam_ae_display', options: {} },
+		])
+		presets['cam_wb_toggle'] = btn('White Balance', 'WB: Toggle Auto/Manual', 'WB\\n--', 'cam_wb_toggle', {}, [
+			{ feedbackId: 'cam_wb_display', options: {} },
+		])
 		for (const [id, bgcolor] of Object.entries(PRESET_BGCOLOR_OVERRIDES)) {
 			if (presets[id]) presets[id].style.bgcolor = bgcolor
 		}
@@ -763,8 +823,21 @@ class DctViscaInstance extends InstanceBase {
 					// otherwise the display can show an older, lower number while
 					// polling catches up mid-turn, looking like a spurious step back.
 					const v = this.knob[p.varId] !== undefined ? this.knob[p.varId] : this.state[p.varId]
-					const bar = progressBar(Number(v), p.min, p.max)
-					return { text: `${p.name}\\n${v ?? '--'}\\n${bar}`, size: 'auto' }
+					const n = Number(v)
+					const text = p.format && Number.isFinite(n) ? p.format(n) : (v ?? '--')
+					// Most params bar-position on the raw wire value; a few (e.g. Audio
+					// Gain) define a separate display-unit scale (barValue/barMin/barMax)
+					// so the bar reflects the same unit as the text above it -- e.g. 0dB
+					// sits at the visual center of a symmetric dB window, not near the
+					// left edge of the raw 0-4095 range. A non-finite barValue (Audio
+					// Gain's raw=0 is -Infinity dB) clamps to the bar's low end instead
+					// of falling through to progressBar()'s own "not finite" dashes.
+					let barVal = p.barValue ? p.barValue(n) : n
+					const barMin = p.barValue ? p.barMin : p.min
+					const barMax = p.barValue ? p.barMax : p.max
+					if (p.barValue && !Number.isFinite(barVal)) barVal = barMin
+					const bar = progressBar(barVal, barMin, barMax)
+					return { text: `${p.name}\\n${text}\\n${bar}`, size: 'auto' }
 				},
 			},
 			wb_measure_display: {
@@ -792,6 +865,24 @@ class DctViscaInstance extends InstanceBase {
 				callback: () => {
 					const full = this.state.dct_sdi_range === 'Full'
 					return { text: `SDI\\n${full ? 'FULL' : 'LEGAL'}`, size: 'auto', bgcolor: full ? LIGHT_BLUE : BLUE, color: WHITE }
+				},
+			},
+			cam_ae_display: {
+				type: 'advanced',
+				name: 'AE toggle (display)',
+				options: [],
+				callback: () => {
+					const auto = this.state.ae_mode !== 'Manual'
+					return { text: `AE\\n${auto ? 'AUTO' : 'MANUAL'}`, size: 'auto', bgcolor: auto ? GREEN : DIM_RED, color: WHITE }
+				},
+			},
+			cam_wb_display: {
+				type: 'advanced',
+				name: 'WB toggle (display)',
+				options: [],
+				callback: () => {
+					const auto = this.state.wb_mode !== 'Manual'
+					return { text: `WB\\n${auto ? 'AUTO' : 'MANUAL'}`, size: 'auto', bgcolor: auto ? GREEN : DIM_RED, color: WHITE }
 				},
 			},
 			dct_timecode_hold_display: {
@@ -921,7 +1012,7 @@ class DctViscaInstance extends InstanceBase {
 			},
 			{ type: 'dropdown', id: 'baud', label: 'Baudrate', width: 3, default: 115200, choices: [{ id: 115200, label: '115200' }, { id: 57600, label: '57600' }], isVisible: (c) => c.conn === 'serial' },
 			{ type: 'number', id: 'address', label: 'Camera address (1-7)', width: 2, default: 1, min: 1, max: 7 },
-			{ type: 'number', id: 'pollInterval', label: 'Poll ms (0=off)', width: 2, default: 0, min: 0, max: 60000 },
+			{ type: 'number', id: 'pollInterval', label: 'Poll ms (0=off, min 2000)', width: 2, default: 0, min: 0, max: 60000 },
 			{ type: 'number', id: 'knobStep', label: 'Knob step (1-255 params)', width: 3, default: 4, min: 1, max: 128 },
 		]
 	}
@@ -939,6 +1030,16 @@ class DctViscaInstance extends InstanceBase {
 		if (!(Number.isFinite(Number(config.knobStep)) && Number(config.knobStep) > 0)) {
 			this.log('warn', `Knob step must be greater than 0 -- resetting "${config.knobStep}" to 4`)
 			config = { ...config, knobStep: 4 }
+			this.saveConfig(config)
+		}
+		// Same "field min is a visual hint only" story as Knob step above: 0
+		// (off) is still valid, but any nonzero interval faster than 2000ms
+		// gets corrected up to the floor and pushed back so the editor doesn't
+		// silently disagree with what's actually polling.
+		const pollMs = Number(config.pollInterval)
+		if (pollMs !== 0 && (!Number.isFinite(pollMs) || pollMs < 2000)) {
+			this.log('warn', `Poll ms must be 0 (off) or at least 2000 -- resetting "${config.pollInterval}" to 2000`)
+			config = { ...config, pollInterval: 2000 }
 			this.saveConfig(config)
 		}
 		this.config = config

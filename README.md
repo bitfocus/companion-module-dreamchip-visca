@@ -13,7 +13,7 @@ space, PQ, noise reduction, detail/denoise, LUT mode/preset, SDI
 range/levels, MCC op-mode, audio, Timecode, white-balance colour
 temperature (settable Kelvin + measured scene cct)). Toggle-style buttons are
 also available for the binary controls (Audio Enable, SDI Range, Timecode
-Run/Hold). Pan/tilt/zoom/focus are out of scope.
+Run/Hold, AE Auto/Manual, WB Auto/Manual). Pan/tilt/zoom/focus are out of scope.
 
 ## Requirements
 
@@ -30,7 +30,7 @@ In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
 | **Target IP** / **TCP port** | TCP mode: the camera's IP and VISCA TCP port (default `4000`) |
 | **Serial port** / **Baud** | Serial mode: the COM port (e.g. `COM3` or `/dev/ttyUSB0`) and baud (default `115200`). Run Companion on the machine physically wired to the camera |
 | **Camera address** | VISCA address `1`–`7` (default `1`) |
-| **Poll ms** | Read-back polling interval in ms; `0` = off (send-only). Set it >0 (e.g. `2000`) to keep variables and feedbacks live. Only the "live" tier is repeated on this interval -- calibration/setup-style values (LUT, filters, CNR/DPF, SDI, gamma, black levels, flare, audio, etc.) are read once per connection instead; use "System: Poll startup values now" to re-sync them on demand |
+| **Poll ms** | Read-back polling interval in ms; `0` = off (send-only), otherwise a **minimum of `2000`** (faster values are automatically raised to 2000). Only the "live" tier is repeated on this interval -- calibration/setup-style values (LUT, filters, CNR/DPF, SDI, gamma, black levels, flare, audio, etc.) are read once per connection instead; use "System: Poll startup values now" to re-sync them on demand |
 | **Knob step** | Turn increment for rotary-knob presets on `0`–`255` params (default `4`); `0`–`15` params always step by 1 |
 
 ## What it exposes
@@ -53,7 +53,7 @@ In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
   connection's label.
 - **Feedbacks** — "AE mode is …", "WB mode is …" (tint the active-mode button),
   "Connection OK", and **"Knob: show current value"** (renders the live value on a
-  rotary encoder's LCD).
+  rotary encoder's LCD, in each parameter's natural unit — see Knobs below).
 
 ## Knobs (Stream Deck+ encoders)
 
@@ -68,7 +68,14 @@ ready-made **rotary-encoder preset** under the `Knobs: <group>` categories:
 - The **encoder LCD** shows the parameter name, its current value, and a text
   progress bar (e.g. `...|......`) marking its position within its range,
   over a generated ring background (`images.js` — no image dependency, drawn
-  by a small from-scratch PNG encoder at load time).
+  by a small from-scratch PNG encoder at load time). The underlying VISCA
+  value always steps in raw wire units; several knobs display it converted to
+  its natural unit instead of the bare number: Gain shows **ISO**, Shutter
+  shows **microseconds**, Audio Gain shows **dB** (0 to ~24dB, stepped in
+  0.5dB increments), Color Temp shows **Kelvin**, Color Hue shows **degrees**,
+  and Red/Blue/Green/Color Gain show a **float factor** (`x`). Gain and
+  Shutter both step logarithmically (perceived in stops, not linearly); the
+  fastest selectable manual Shutter is floored at 200µs.
 
 Drag a knob preset onto a Stream Deck+ encoder (or an encoder in the web/emulator
 surface). To build your own, enable **Rotary Actions** on a button and map
