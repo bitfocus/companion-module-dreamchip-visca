@@ -26,7 +26,7 @@ Reset is still always run once at the very end regardless, as the cleanup
 step described above. It is not part of `npm test`, and requires a camera
 attached.
 
-Companion's own background polling (`main.js`) is two-tier: 36 of the 54
+Companion's own background polling (`main.js`) is two-tier: 35 of the 54
 inquiries are calibration/setup-style values (`INQUIRIES.*.once: true` in
 `commands.js`) that are only ever queried once per connection
 (`pollStartupOnce()`) or on demand ("System: Poll startup values now"), not
@@ -66,9 +66,7 @@ necessarily via the recurring poll.
 | CNR Auto: Off | cnr_auto 0 | [ Y] | |
 | CNR Auto: On | cnr_auto 1 | [ Y] | dont see a change|
 | CNR Mode | cnr_mode <value> | [ Y] | |
-| DPF Enable: Off | dpf_enable 0 | [ N] | |
-| DPF Enable: On | dpf_enable 1 | [ N] | |
-| DPF Strength | dpf_strength <value> | [ N] | |
+| DPF Strength | dpf_strength <value>  // "DPF Enable" removed from Companion: dpf_enable/dpf_strength were both deleted from firmware in favor of a single dpf_denoise 0-7 knob (0=off); the VISCA mapping for function 0x13 was fixed to follow the rename, but the Companion command is still named/wired as dpf_strength pending that rename here too | [ N] | |
 | Filter Enable: Off | filter_enable 0 | [ Y] | |
 | Filter Enable: On | filter_enable 1 | [ Y] | |
 | Filter Detail | filter_detail <raw=<value>>  // real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring | [ Y] | |
@@ -206,8 +204,7 @@ necessarily via the recurring poll.
 | S-Log3 Master Gain | real range is signed -6..12 dB (system_settings.h); do_slog3_master_gain hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ ] | |
 | CNR Mode | cnr_mode | [ ] | |
 | CNR Auto | cnr_auto | [ ] | |
-| DPF Enable | dpf_enable | [ ] | |
-| DPF Strength | dpf_strength | [ ] | |
+| DPF Strength | dpf_strength  // removed from firmware (see Companion Actions section above); this inquiry is kept in Companion but will always error until renamed to dpf_denoise | [ ] | |
 | Filter Enable | filter_enable | [ ] | |
 | Filter Detail | real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring | [ ] | |
 | Filter Denoise | filter_denoise | [ ] | |

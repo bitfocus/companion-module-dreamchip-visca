@@ -78,6 +78,17 @@ const CONFIRM_POLL_INQUIRY_ID = { cam_ae: 'ae_mode', cam_wb: 'wb_mode' }
 // wouldn't get at all.
 const ENUM_RUD_INQUIRY_ID = { dct_ggain: 'dct_ggain' }
 
+// enum COMMANDS ids that are purely a named-shortcut UI for a sibling
+// `direct`-kind knob (dct_tm_mode_preset -> dct_tm_mode, dct_color_space_preset
+// -> dct_color_space, same idea as Gain (ISO)/Shutter (Speed) but via 'enum'
+// instead of a curated table) -- pressing one of these buttons sends an exact,
+// deterministically-known value (unlike a RUD reset), so it can write the
+// sibling knob/state immediately instead of waiting on the next poll, which
+// would otherwise never happen at all for a `once:true` (startup-only) param
+// like these two. The raw value is the choice's position in `choices`
+// (insertion order == wire value 0,1,2... for both of these).
+const PRESET_KNOB_TARGET = { dct_tm_mode_preset: 'dct_tm_mode', dct_color_space_preset: 'dct_color_space' }
+
 // The firmware itself forces AE/AWB into Manual as a side effect of setting
 // these varIds (ae_ensure_manual()/visca_wb_ensure_manual() in the BSP's
 // VISCA layer -- same "the auto algorithm would silently overwrite this on
@@ -88,6 +99,30 @@ const ENUM_RUD_INQUIRY_ID = { dct_ggain: 'dct_ggain' }
 // is deliberately written (see setKnobValue() and applyInquiryReply()'s
 // resyncKnob branch below).
 const MODE_SIDE_EFFECT_INQUIRY = { gain: 'ae_mode', shutter: 'ae_mode', rgain: 'wb_mode', bgain: 'wb_mode', dct_ggain: 'wb_mode', dct_wb_temp: 'wb_mode' }
+
+// version_inq's model-id field (doc/VISCA.md "HH HH"; commands.js's 'version'
+// decode formats it as "...model=0x0000..."/"...model=0x0001..."). Camera
+// firmware distinguishes Violetta (ProVideo ISP) vs Marietta (Phoenix ISP)
+// this way -- see visca_map_system.c's version_inq handler in the BSP.
+const CAMERA_MODEL_BY_ID = { '0000': 'violetta', '0001': 'marietta' }
+function parseCameraModel(versionText) {
+	const m = /model=0x([0-9a-f]+)/i.exec(versionText ?? '')
+	return m ? CAMERA_MODEL_BY_ID[m[1].padStart(4, '0').toLowerCase()] : undefined
+}
+
+// Commands/presets that don't apply to one of the two camera product lines
+// (confirmed: dpf_denoise/tm_mode genuinely require the Phoenix ISP, i.e.
+// Marietta-only, so both are unusable -- and thus hidden -- on Violetta;
+// filter_enable/filter_denoise/gain_mode are hidden on Marietta per product
+// decision). Applied in setupActions()/setupPresets() and the poll filters
+// once the camera's model is known (see this.cameraModel, set from
+// applyInquiryReply()'s version-reply hook) -- unknown model means
+// unrestricted, so a camera whose firmware predates this model-id fix (or a
+// failed/slow version poll) never has controls incorrectly hidden.
+const MODEL_GATED_IDS = {
+	violetta: ['dct_dpf_strength', 'dct_tm_mode', 'dct_tm_mode_preset'],
+	marietta: ['dct_filter_enable', 'dct_filter_denoise', 'dct_gain_mode'],
+}
 
 // Knobs whose real command already has a proper RUD "Reset" (server-side
 // target, confirmed via RUD_INQUIRY_ID's unconditional resyncKnob confirm-
@@ -167,6 +202,7 @@ class DctViscaInstance extends InstanceBase {
 		this.knobLockUntil = {} // per-varId: Date.now() ms until which background polling won't resync this.knob (see setKnobValue())
 		this.consecutiveTimeouts = 0 // see markNoReply()/markReplyReceived()
 		this.linkWarning = false // true once we've downgraded Ok -> UnknownWarning for no replies
+		this.cameraModel = undefined // 'violetta'|'marietta'|undefined (unknown -> unrestricted), see MODEL_GATED_IDS
 		this.params = continuousParams()
 		this.paramById = Object.fromEntries(this.params.map((p) => [p.id, p]))
 		this.availableSerialPorts = [] // cached SerialPort.list() entries ({path, vendorId, manufacturer}), for the config editor's Serial port dropdown
@@ -436,6 +472,14 @@ class DctViscaInstance extends InstanceBase {
 		if (q.varId === 'dct_audio_enable') this.checkFeedbacks('dct_audio_enable_is', 'dct_audio_enable_display')
 		if (q.varId === 'dct_sdi_range') this.checkFeedbacks('dct_sdi_range_is', 'dct_sdi_range_display')
 		if (q.varId === 'dct_timecode_hold') this.checkFeedbacks('dct_timecode_hold_display')
+		if (q.varId === 'version') {
+			const model = parseCameraModel(value)
+			if (model && model !== this.cameraModel) {
+				this.cameraModel = model
+				this.setupActions()
+				this.setupPresets()
+			}
+		}
 		this.checkFeedbacks('knob_value')
 		this.checkFeedbacks('wb_measure_display')
 	}
@@ -519,7 +563,9 @@ class DctViscaInstance extends InstanceBase {
 	// --- actions -----------------------------------------------------------
 	setupActions() {
 		const actions = {}
+		const gatedIds = MODEL_GATED_IDS[this.cameraModel] ?? []
 		for (const [id, c] of Object.entries(COMMANDS)) {
+			if (gatedIds.includes(id)) continue
 			const a = { name: `${c.group}: ${c.name}`, options: [] }
 			if (c.kind === 'enum') {
 				const ids = Object.keys(c.choices)
@@ -529,6 +575,8 @@ class DctViscaInstance extends InstanceBase {
 					if (CONFIRM_POLL_ENUM_IDS.has(id)) this.confirmIfNotPolling(CONFIRM_POLL_INQUIRY_ID[id] ?? id)
 					const rudQId = ENUM_RUD_INQUIRY_ID[id]
 					if (rudQId) this.inquireOnce(rudQId, { resyncKnob: true })
+					const knobVarId = PRESET_KNOB_TARGET[id]
+					if (knobVarId) this.setKnobValue(knobVarId, ids.indexOf(ev.options.choice))
 				}
 			} else if (c.kind === 'rud') {
 				const rudChoices = c.rudChoices ?? Object.keys(RUD)
@@ -711,7 +759,9 @@ class DctViscaInstance extends InstanceBase {
 			steps: [{ down: [{ actionId, options }], up: [] }],
 			feedbacks,
 		})
+		const gatedIds = MODEL_GATED_IDS[this.cameraModel] ?? []
 		for (const [id, c] of Object.entries(COMMANDS)) {
+			if (gatedIds.includes(id)) continue
 			if (c.kind === 'enum') {
 				for (const choice of Object.keys(c.choices)) {
 					presets[`${id}_${choice}`] = btn(c.group, `${c.name}: ${choice}`, `${c.name}\\n${choice}`, id, { choice })
@@ -739,6 +789,7 @@ class DctViscaInstance extends InstanceBase {
 		}
 		// Rotary-encoder (Stream Deck+) knobs: turn = adjust +/- step, press = sync.
 		for (const p of this.params) {
+			if (gatedIds.includes(p.id)) continue
 			const step = p.step ?? (p.max <= 15 ? 1 : this.knobStep())
 			presets[`knob_${p.id}`] = {
 				type: 'button',
@@ -948,7 +999,8 @@ class DctViscaInstance extends InstanceBase {
 	// it stays exhaustive -- every inquiry except the ones that can never
 	// succeed at all (NO_POLL_INQUIRY_IDS), regardless of the `once` tier.
 	pollOnce() {
-		this.pollBatch(Object.entries(INQUIRIES).filter(([id]) => !NO_POLL_INQUIRY_IDS.has(id)).map(([, q]) => q))
+		const gatedIds = MODEL_GATED_IDS[this.cameraModel] ?? []
+		this.pollBatch(Object.entries(INQUIRIES).filter(([id]) => !NO_POLL_INQUIRY_IDS.has(id) && !gatedIds.includes(id)).map(([, q]) => q))
 	}
 
 	// The recurring background cycle (startPolling()'s setInterval). Skips
@@ -957,15 +1009,23 @@ class DctViscaInstance extends InstanceBase {
 	// a live session) -- only the "live" tier needs repeated polling, which
 	// keeps every cycle shorter than a full pollOnce() would be.
 	pollLiveOnce() {
-		this.pollBatch(Object.entries(INQUIRIES).filter(([id, q]) => !NO_POLL_INQUIRY_IDS.has(id) && !q.once).map(([, q]) => q))
+		const gatedIds = MODEL_GATED_IDS[this.cameraModel] ?? []
+		this.pollBatch(Object.entries(INQUIRIES).filter(([id, q]) => !NO_POLL_INQUIRY_IDS.has(id) && !q.once && !gatedIds.includes(id)).map(([, q]) => q))
 	}
 
 	// Fired once per successful (re)connection (see initSerial()/initTCP())
 	// and by the "System: Poll startup values now" action -- refreshes just
 	// the `once`-tagged tier pollLiveOnce() otherwise never touches, in case
 	// it changed while disconnected (another controller, a reboot, etc.).
+	// Note: on the very first connect, this.cameraModel is still unknown
+	// (gatedIds is []), so this batch includes `version` itself (needed to
+	// learn the model at all) plus every once-tagged id, gated or not -- a
+	// harmless one-time query for whichever ids turn out to be gated. Later
+	// calls (reconnect, or the manual "Poll startup values now" action) skip
+	// them correctly once the model is known.
 	pollStartupOnce() {
-		this.pollBatch(Object.values(INQUIRIES).filter((q) => q.once))
+		const gatedIds = MODEL_GATED_IDS[this.cameraModel] ?? []
+		this.pollBatch(Object.values(INQUIRIES).filter((q) => q.once && !gatedIds.includes(q.varId)))
 	}
 
 	// --- lifecycle ---------------------------------------------------------

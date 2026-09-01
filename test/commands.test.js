@@ -733,13 +733,13 @@ test("continuousParams' Color Space entry is narrowed to 0-2 (do_color_space har
 test('Color Space Preset (dct_color_space_preset) sends the exact confirmed-working wire frame for each of the 3 choices', () => {
 	const c = COMMANDS.dct_color_space_preset
 	assert.equal(c.kind, 'enum')
-	assert.deepEqual(Object.keys(c.choices), ['Rec.709', 'Rec.2020', 'S-Gamut3.Cine'])
+	assert.deepEqual(Object.keys(c.choices), ['Rec.709', 'Rec.2020', 'SGam3.Cine'])
 	// raw hardware confirmation: 81 01 7e 01 17 00 ff -> ACK+Completion (not the
 	// earlier-reported 90 61 41 ff error, which turned out to be unrelated to
 	// the VISCA mapping itself -- see the color_space investigation).
 	assert.deepEqual([...buildFrame(1, c.choices['Rec.709'])], [0x81, 0x01, 0x7e, 0x01, 0x17, 0x00, 0xff])
 	assert.deepEqual([...buildFrame(1, c.choices['Rec.2020'])], [0x81, 0x01, 0x7e, 0x01, 0x17, 0x01, 0xff])
-	assert.deepEqual([...buildFrame(1, c.choices['S-Gamut3.Cine'])], [0x81, 0x01, 0x7e, 0x01, 0x17, 0x02, 0xff])
+	assert.deepEqual([...buildFrame(1, c.choices['SGam3.Cine'])], [0x81, 0x01, 0x7e, 0x01, 0x17, 0x02, 0xff])
 	// same underlying wire command as the raw Color Space (direct) entry --
 	// purely additive, both stay independently usable.
 	assert.deepEqual(c.choices['Rec.709'].slice(0, 4), COMMANDS.dct_color_space.prefix)
@@ -751,10 +751,19 @@ test("continuousParams' LUT Mode entry is narrowed to 0-1 (LUT_MODE_FIXED=2 is r
 	assert.equal(p.max, 1)
 })
 
-test('dct_tm_mode is not exposed (tm_mode\'s "off" path is a known-incomplete hack; see TODO.md)', () => {
-	assert.equal(COMMANDS.dct_tm_mode, undefined)
-	assert.equal(INQUIRIES.dct_tm_mode, undefined)
-	assert.equal(continuousParams().some((p) => p.id === 'dct_tm_mode'), false)
+test('dct_tm_mode is exposed (0-4, direct + 5-choice preset) now that the BSP fixed tm_mode\'s "off" hack', () => {
+	const c = COMMANDS.dct_tm_mode
+	assert.equal(c.kind, 'direct')
+	assert.deepEqual(c.prefix, [0x01, 0x7e, 0x01, 0x21])
+	assert.equal(c.min, 0)
+	assert.equal(c.max, 4)
+	assert.ok(INQUIRIES.dct_tm_mode)
+	assert.equal(continuousParams().some((p) => p.id === 'dct_tm_mode'), true)
+
+	const preset = COMMANDS.dct_tm_mode_preset
+	assert.equal(preset.kind, 'enum')
+	assert.deepEqual(Object.keys(preset.choices), ['Off', '+0.5EV', '+1.0EV', '+1.5EV', '+2.0EV'])
+	assert.deepEqual(preset.choices['+1.0EV'], [0x01, 0x7e, 0x01, 0x21, 2])
 })
 
 test('SDI Black (direct) is signed, -60..60 (do_sdi_black hard-rejects outside that)', () => {
@@ -841,11 +850,11 @@ test('exactly the 36 calibration/setup-style inquiries are tagged once:true (sta
 		[
 			'dct_aec_maxgain', 'dct_aec_setpoint', 'dct_aec_speed', 'dct_audio_gain',
 			'dct_auto_save', 'dct_awb_speed', 'dct_black_blue', 'dct_black_green', 'dct_black_master',
-			'dct_black_red', 'dct_cnr_auto', 'dct_cnr_mode', 'dct_color_space', 'dct_dpf_enable',
+			'dct_black_red', 'dct_cnr_auto', 'dct_cnr_mode', 'dct_color_space',
 			'dct_dpf_strength', 'dct_filter_denoise', 'dct_filter_detail', 'dct_filter_enable',
 			'dct_flare_blue', 'dct_flare_green', 'dct_flare_red', 'dct_gain_mode', 'dct_lut_fixed_mode',
 			'dct_lut_mode', 'dct_lut_preset', 'dct_mcc_opmode', 'dct_osd', 'dct_pq_max_bright',
-			'dct_sdi_black', 'dct_sdi_white', 'dct_slog3_gain', 'flicker', 'flip',
+			'dct_sdi_black', 'dct_sdi_white', 'dct_slog3_gain', 'dct_tm_mode', 'flicker', 'flip',
 			'gamma', 'version', 'video_mode',
 		].sort(),
 	)
@@ -863,16 +872,17 @@ test('Gain/Shutter/AE/WB/RGB-gain/Green-gain/Bright/Contrast/Color-Gain-Hue/Time
 
 // --- knob display formatters (raw wire value -> human-readable text) ------
 
-test('gainRawToIso is the inverse of the map_gain() real-gain formula, in ISO units', () => {
+test('gainRawToIso is the inverse of the map_gain() real-gain formula, in ISO units (rounded UP, not to nearest)', () => {
 	// raw 0 -> real 1000 -> ISO 140 (the OG03A10 1x/0dB floor)
 	assert.equal(gainRawToIso(0), 140)
-	// raw 4095 -> real 45715 -> ISO 6400 (exact top of the curated table)
-	assert.equal(gainRawToIso(4095), 6400)
+	// raw 4095 -> real 45715 -> ISO 6400.1 -> ceil -> 6401 (rounds up, not down
+	// to the curated table's nominal top value)
+	assert.equal(gainRawToIso(4095), 6401)
 	// raw->ISO->raw isn't lossless (truncating integer division both ways,
 	// same caveat as shutterRawToUs below) -- for every curated ISO step,
-	// gainRawToIso(its raw) must land within 2 ISO of the original.
+	// gainRawToIso(its raw) must land within 1 ISO of the original.
 	for (const { iso, raw } of GAIN_ISO) {
-		assert.ok(Math.abs(gainRawToIso(raw) - iso) <= 2, `ISO ${iso}: raw ${raw} -> ${gainRawToIso(raw)}`)
+		assert.ok(Math.abs(gainRawToIso(raw) - iso) <= 1, `ISO ${iso}: raw ${raw} -> ${gainRawToIso(raw)}`)
 	}
 })
 

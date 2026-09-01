@@ -30,13 +30,13 @@ test('DCT-ext direct-set frame (dpf_strength) translates 1:1, no scaling', () =>
 	assert.equal(entries[0].provideo, 'dpf_strength 9')
 })
 
-test('DCT-ext inquiry + error reply (real session example: DPF Enable, not executable)', () => {
-	const lines = parseLines(`${tx([0x09, 0x7e, 0x01, 0x12])}\n${rx([0x60, 0x41])}`)
+test('DCT-ext inquiry + error reply (real session example: Color Space, not executable)', () => {
+	const lines = parseLines(`${tx([0x09, 0x7e, 0x01, 0x17])}\n${rx([0x60, 0x41])}`)
 	const entries = decodeDump(lines)
 	assert.equal(entries.length, 2)
-	assert.match(entries[0].companion, /DPF Enable \(inquiry\)/)
+	assert.match(entries[0].companion, /Color Space \(inquiry\)/)
 	assert.match(entries[1].provideo, /ERROR 0x41 \(Command Not Executable\)/)
-	assert.match(entries[1].provideo, /dpf_enable not executable/)
+	assert.match(entries[1].provideo, /color_space not executable/)
 })
 
 test('DCT-ext inquiry + successful reply decodes the value and names the ProVideo command', () => {

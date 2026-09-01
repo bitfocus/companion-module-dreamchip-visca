@@ -92,12 +92,14 @@ export const GAIN_ISO_STEPS = [140, 160, 200, 250, 320, 400, 500, 640, 800, 1000
 export const GAIN_ISO = GAIN_ISO_STEPS.map((iso) => ({ iso, raw: isoToGainRaw(iso) }))
 // Inverse of isoToGainRaw()'s underlying map_gain() -- for DISPLAYING the
 // Gain (direct) knob's current raw value as an ISO number (the knob still
-// steps in raw units; only the shown text changes). Ordinary rounding is
-// fine here (unlike isoToGainRaw() above): we're going raw -> real -> ISO,
-// not back through the firmware's own truncating raw(ISO) inverse.
+// steps in raw units; only the shown text changes). We're going raw -> real
+// -> ISO here, not back through the firmware's own truncating raw(ISO)
+// inverse, so ordinary rounding would be fine numerically -- rounds UP
+// (ceil) instead per project preference, so the displayed ISO never reads
+// slightly under the real sensitivity actually in effect.
 export function gainRawToIso(raw) {
 	const real = GAIN_REAL_MIN + Math.trunc((raw * (GAIN_REAL_MAX - GAIN_REAL_MIN)) / GAIN_RAW_MAX)
-	return Math.round((real / 1000) * GAIN_ISO_MIN)
+	return Math.ceil((real / 1000) * GAIN_ISO_MIN)
 }
 
 // --- Shutter (Speed) named-step table ---------------------------------------
@@ -231,6 +233,12 @@ export function decodeReply(decode, payload) {
 			return Buffer.from(payload).toString('hex')
 	}
 }
+
+// tm_mode's 5 named states (TM_MODE_OFF..TM_MODE_2_0_EV, isp_drv.h), index ==
+// wire value == raw wire nibble. Single source of truth for both
+// dct_tm_mode's knob display and dct_tm_mode_preset's per-choice buttons, so
+// the labels/choices/values can never drift apart.
+const TM_MODE_LABELS = ['Off', '+0.5EV', '+1.0EV', '+1.5EV', '+2.0EV']
 
 // --- SET commands ----------------------------------------------------------
 const P = (...b) => b // tiny helper to keep the table readable
@@ -441,13 +449,26 @@ export const COMMANDS = {
 		choices: {
 			'Rec.709': P(0x01, 0x7e, 0x01, 0x17, 0x00),
 			'Rec.2020': P(0x01, 0x7e, 0x01, 0x17, 0x01),
-			'S-Gamut3.Cine': P(0x01, 0x7e, 0x01, 0x17, 0x02),
+			'SGam3.Cine': P(0x01, 0x7e, 0x01, 0x17, 0x02),
 		},
 	},
-	// dct_tm_mode (tm_mode, SS 0x21) is intentionally NOT exposed: do_tm_mode's
-	// own "off" (0) path is marked "a hack to have something for the NAB"
-	// (product/src/cmd_tm.c) and does not reliably disable tone mapping on
-	// real hardware -- see TODO.md.
+	// tm_mode's real range is 0-4 (TM_MODE_OFF..TM_MODE_2_0_EV, isp_drv.h);
+	// do_tm_mode hard-rejects outside that with -EINVAL. The old "off path is
+	// a hack for NAB" caveat that kept this excluded no longer applies -- BSP
+	// commit 645f07e replaced the ad-hoc register poke with a real 5-entry
+	// tone-curve LUT (isp_phoenix.c) where mode 0 is a proper identity curve.
+	dct_tm_mode: {
+		name: 'Tone Mapping Mode', group: 'System', kind: 'direct',
+		prefix: P(0x01, 0x7e, 0x01, 0x21), nibbles: 1, min: 0, max: 4,
+	},
+	// Tone Mapping Mode: 5 individual per-choice buttons for the SAME wire
+	// command as dct_tm_mode above -- purely additive, same pattern as Color
+	// Space/Gain (ISO)/Shutter (Speed); the raw direct number-input stays for
+	// manual entry.
+	dct_tm_mode_preset: {
+		name: 'Tone Mapping Mode', group: 'System', kind: 'enum',
+		choices: Object.fromEntries(TM_MODE_LABELS.map((label, v) => [label, P(0x01, 0x7e, 0x01, 0x21, v)])),
+	},
 	// pq_max_brightness's real range is 100-10000 cd/m2 (do_pq_max_brightness);
 	// widened to 3 nibbles (0-4095) for ~2.4 cd/m2 per step, matching the BSP.
 	// step: 30 overrides the generic knob preset's default step (main.js's
@@ -457,7 +478,10 @@ export const COMMANDS = {
 
 	dct_cnr_auto: { name: 'CNR Auto', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x11, 0x00), On: P(0x01, 0x7e, 0x01, 0x11, 0x01) } },
 	dct_cnr_mode: { name: 'CNR Mode', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x10), nibbles: 1 },
-	dct_dpf_enable: { name: 'DPF Enable', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x12, 0x00), On: P(0x01, 0x7e, 0x01, 0x12, 0x01) } },
+	// dpf_enable no longer exists as a ProVideo command (removed same-day as
+	// dpf_strength in favor of a single dpf_denoise knob, see dct_dpf_strength
+	// below) -- there is nothing left to map On/Off to, so this button/
+	// inquiry is removed rather than kept as permanently-erroring dead code.
 	dct_dpf_strength: { name: 'DPF Strength', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x13), nibbles: 1 },
 	dct_filter_enable: { name: 'Filter Enable', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x14, 0x00), On: P(0x01, 0x7e, 0x01, 0x14, 0x01) } },
 	// real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL, firmware hard-rejects >=32);
@@ -528,10 +552,22 @@ export const COMMANDS = {
 	dct_aec_setpoint: { name: 'AEC SetPoint', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x18), nibbles: 3, min: 50, max: 3000 },
 	// speed: real range 1-30 (AEC_LOW_PASS_FILTER_SIZE_MIN/MAX); 2 nibbles
 	// (0-255) clamp to it, no scaling needed. Same `min`/`max` narrowing.
-	dct_aec_speed: { name: 'AEC Speed', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x19), nibbles: 2, min: 1, max: 30 },
+	// logScale like Gain/Shutter (same reasoning: perceived/graded, not
+	// linear); no `format` -- raw IS the real value 1-30 already (no
+	// wire-scaling gap to convert through, unlike ISO/us), so there's no
+	// separate human unit to display. minStep left at its default (1):
+	// gain/shutter's minStep:4 floor was sized for their 0-4095 raw space,
+	// not this 1-30 one -- default 1 is already the finest possible step here.
+	dct_aec_speed: { name: 'AEC Speed', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x19), nibbles: 2, min: 1, max: 30, logScale: true, stepPercent: 5 },
 	// maxGain: real range 1000-45715 (same as cam_gain, same underlying
-	// isi_access_get_gain_range query); 3 nibbles, linearly scaled.
-	dct_aec_maxgain: { name: 'AEC Max Gain', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1a), nibbles: 3 },
+	// isi_access_get_gain_range query) -- identical raw<->real formula, so
+	// this gets the exact same treatment as cam_gain_direct, reusing
+	// gainRawToIso() directly rather than a new conversion function.
+	dct_aec_maxgain: {
+		name: 'AEC Max Gain', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1a), nibbles: 3,
+		logScale: true, stepPercent: 5, minStep: 4,
+		format: (raw) => `ISO ${gainRawToIso(raw)}`,
+	},
 
 	dct_auto_save: { name: 'Auto Save', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x62, 0x00), On: P(0x01, 0x7e, 0x01, 0x62, 0x01) } },
 	dct_timecode_hold: { name: 'Timecode', group: 'System', kind: 'enum', choices: { Run: P(0x01, 0x7e, 0x01, 0x64, 0x00), Hold: P(0x01, 0x7e, 0x01, 0x64, 0x01) } },
@@ -596,12 +632,12 @@ export const INQUIRIES = {
 	dct_slog3_gain: { name: 'S-Log3 Master Gain', varId: 'dct_slog3_gain', payload: P(0x09, 0x7e, 0x01, 0x09), decode: { type: 'value', signed: true }, once: true },
 	dct_cnr_mode: { name: 'CNR Mode', varId: 'dct_cnr_mode', payload: P(0x09, 0x7e, 0x01, 0x10), decode: { type: 'value' }, once: true },
 	dct_cnr_auto: { name: 'CNR Auto', varId: 'dct_cnr_auto', payload: P(0x09, 0x7e, 0x01, 0x11), decode: { type: 'enum', map: ENUM.dct_onoff }, once: true },
-	dct_dpf_enable: { name: 'DPF Enable', varId: 'dct_dpf_enable', payload: P(0x09, 0x7e, 0x01, 0x12), decode: { type: 'enum', map: ENUM.dct_onoff }, once: true },
 	dct_dpf_strength: { name: 'DPF Strength', varId: 'dct_dpf_strength', payload: P(0x09, 0x7e, 0x01, 0x13), decode: { type: 'value' }, once: true },
 	dct_filter_enable: { name: 'Filter Enable', varId: 'dct_filter_enable', payload: P(0x09, 0x7e, 0x01, 0x14), decode: { type: 'enum', map: ENUM.dct_onoff }, once: true },
 	dct_filter_detail: { name: 'Filter Detail', varId: 'dct_filter_detail', payload: P(0x09, 0x7e, 0x01, 0x15), decode: { type: 'value' }, once: true },
 	dct_filter_denoise: { name: 'Filter Denoise', varId: 'dct_filter_denoise', payload: P(0x09, 0x7e, 0x01, 0x16), decode: { type: 'value' }, once: true },
 	dct_color_space: { name: 'Color Space', varId: 'dct_color_space', payload: P(0x09, 0x7e, 0x01, 0x17), decode: { type: 'value' }, once: true },
+	dct_tm_mode: { name: 'Tone Mapping Mode', varId: 'dct_tm_mode', payload: P(0x09, 0x7e, 0x01, 0x21), decode: { type: 'value' }, once: true },
 	dct_pq_max_bright: { name: 'PQ Max Brightness', varId: 'dct_pq_max_bright', payload: P(0x09, 0x7e, 0x01, 0x22), decode: { type: 'value' }, once: true },
 	dct_lut_mode: { name: 'LUT Mode', varId: 'dct_lut_mode', payload: P(0x09, 0x7e, 0x01, 0x24), decode: { type: 'value' }, once: true },
 	dct_lut_fixed_mode: { name: 'LUT Fixed Mode', varId: 'dct_lut_fixed_mode', payload: P(0x09, 0x7e, 0x01, 0x25), decode: { type: 'value' }, once: true },
