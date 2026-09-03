@@ -19,15 +19,21 @@ const WHITE = combineRgb(255, 255, 255)
 // Per-preset background overrides, applied after generation (default is BLUE
 // from the shared btn() helper). Orange calls out the 3 "hands control back
 // to the camera's auto algorithms / wipes settings" buttons; dim red/green/
-// blue color-codes the R/G/B gain reset buttons and their knob presets to
-// match the channel they act on.
+// blue color-codes the R/G/B gain reset/up/down buttons and their knob
+// presets to match the channel they act on.
 const PRESET_BGCOLOR_OVERRIDES = {
 	cam_settings_reset: ORANGE,
 	cam_wb_Auto: ORANGE,
 	cam_ae_Auto: ORANGE,
 	cam_rgain_reset: DIM_RED,
+	cam_rgain_up: DIM_RED,
+	cam_rgain_down: DIM_RED,
 	cam_bgain_reset: DIM_BLUE,
+	cam_bgain_up: DIM_BLUE,
+	cam_bgain_down: DIM_BLUE,
 	dct_ggain_Reset: DIM_GREEN,
+	dct_ggain_Up: DIM_GREEN,
+	dct_ggain_Down: DIM_GREEN,
 	knob_cam_rgain_direct: DIM_RED,
 	knob_cam_bgain_direct: DIM_BLUE,
 	knob_dct_ggain_direct: DIM_GREEN,
