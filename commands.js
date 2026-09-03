@@ -240,6 +240,12 @@ export function decodeReply(decode, payload) {
 // the labels/choices/values can never drift apart.
 const TM_MODE_LABELS = ['Off', '+0.5EV', '+1.0EV', '+1.5EV', '+2.0EV']
 
+// color_space's 3 named states (COLOR_SPACE_REC709/REC2020/S_GAMUT3_CINE,
+// isp_drv.h), index == wire value == raw wire nibble. Single source of truth
+// for both dct_color_space's knob display and dct_color_space_preset's
+// per-choice buttons, so the labels/choices/values can never drift apart.
+const COLOR_SPACE_LABELS = ['Rec.709', 'Rec.2020', 'SGam3.Cine']
+
 // --- SET commands ----------------------------------------------------------
 const P = (...b) => b // tiny helper to keep the table readable
 export const COMMANDS = {
@@ -376,7 +382,20 @@ export const COMMANDS = {
 	// duplicate of cam_bright_direct so it's deliberately not exposed here.)
 	cam_bright: { name: 'Bright', group: 'System', kind: 'rud', func: 0x0d },
 	cam_bright_direct: { name: 'Bright (direct)', group: 'System', kind: 'direct', prefix: P(0x01, 0x04, 0x0d, 0x00, 0x00), nibbles: 2, signed: true },
-	cam_contrast_direct: { name: 'Contrast (direct)', group: 'System', kind: 'direct', prefix: P(0x01, 0x04, 0xa2, 0x00, 0x00), nibbles: 2 },
+	// post_cont's real factory default/neutral is 128 (0x80, "1.0x" -- see
+	// KNOB_PRESS_SET_VALUE in main.js), not the wire's own 0. This is a
+	// display-only offset (raw - 128), NOT `signed: true` -- that flag is a
+	// two's-complement reinterpretation (raw 0 stays 0, negative wraps from
+	// the TOP of the wire range), which would give the wrong mapping here
+	// (128 would decode to -128, not 0) and would also change the direct-
+	// entry action's/inquiry's raw semantics, not just this display text.
+	cam_contrast_direct: {
+		name: 'Contrast (direct)', group: 'System', kind: 'direct', prefix: P(0x01, 0x04, 0xa2, 0x00, 0x00), nibbles: 2,
+		format: (raw) => {
+			const v = raw - 128
+			return v > 0 ? `+${v}` : String(v)
+		},
+	},
 	// The standard VISCA set also defines cam_lr_reverse (func 0x61) and
 	// cam_picture_flip (func 0x66) -- independent On/Off toggles of just the
 	// horizontal or vertical bit of this same `flip` value via read-modify-
@@ -439,18 +458,17 @@ export const COMMANDS = {
 	// S_GAMUT3_CINE, isp_drv.h; do_color_space hard-rejects outside 0-2 with
 	// -EOPNOTSUPP); `max` narrows the Companion-side UI/knob range from the
 	// wire's full 1-nibble 0-15 capacity.
-	dct_color_space: { name: 'Color Space', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x17), nibbles: 1, min: 0, max: 2 },
+	dct_color_space: {
+		name: 'Color Space', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x17), nibbles: 1, min: 0, max: 2,
+		format: (raw) => COLOR_SPACE_LABELS[raw] ?? String(raw),
+	},
 	// Color Space: 3 individual per-choice buttons for the SAME wire command
 	// as dct_color_space above -- purely additive, same pattern as Gain
 	// (ISO)/Shutter (Speed); the raw Color Space (direct) number-input stays
 	// for manual entry.
 	dct_color_space_preset: {
 		name: 'Color Space', group: 'System', kind: 'enum',
-		choices: {
-			'Rec.709': P(0x01, 0x7e, 0x01, 0x17, 0x00),
-			'Rec.2020': P(0x01, 0x7e, 0x01, 0x17, 0x01),
-			'SGam3.Cine': P(0x01, 0x7e, 0x01, 0x17, 0x02),
-		},
+		choices: Object.fromEntries(COLOR_SPACE_LABELS.map((label, v) => [label, P(0x01, 0x7e, 0x01, 0x17, v)])),
 	},
 	// tm_mode's real range is 0-4 (TM_MODE_OFF..TM_MODE_2_0_EV, isp_drv.h);
 	// do_tm_mode hard-rejects outside that with -EINVAL. The old "off path is
@@ -460,6 +478,7 @@ export const COMMANDS = {
 	dct_tm_mode: {
 		name: 'Tone Mapping Mode', group: 'System', kind: 'direct',
 		prefix: P(0x01, 0x7e, 0x01, 0x21), nibbles: 1, min: 0, max: 4,
+		format: (raw) => TM_MODE_LABELS[raw] ?? String(raw),
 	},
 	// Tone Mapping Mode: 5 individual per-choice buttons for the SAME wire
 	// command as dct_tm_mode above -- purely additive, same pattern as Color
