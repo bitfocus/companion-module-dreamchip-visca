@@ -246,6 +246,24 @@ const TM_MODE_LABELS = ['Off', '+0.5EV', '+1.0EV', '+1.5EV', '+2.0EV']
 // per-choice buttons, so the labels/choices/values can never drift apart.
 const COLOR_SPACE_LABELS = ['Rec.709', 'Rec.2020', 'SGam3.Cine']
 
+// black_red/green/blue's real factory default is NOT 0 -- it's a per-ISP
+// calibration constant (ISP_BLACK_RED/GREEN/BLUE_DEFAULT): 256 on the
+// ProVideo ISP (Violetta, isp_drv_provideo.h), 16 on the Phoenix ISP
+// (Marietta, isp_drv_phoenix.h). Unlike Contrast's raw-128 (a fixed point
+// baked into the wire encoding itself), this default varies by connected
+// camera, so dct_black_red/green/blue's format needs to know the model
+// (passed as its 2nd arg by the knob_value feedback, main.js) to show a
+// "0 at factory default" delta. Model unknown (no version reply yet) shows
+// the real value with no delta rather than guessing a default.
+const BLACK_DEFAULT_BY_MODEL = { violetta: 256, marietta: 16 }
+function formatBlackDelta(raw, model) {
+	const real = raw * 2
+	const def = BLACK_DEFAULT_BY_MODEL[model]
+	if (def === undefined) return String(real)
+	const delta = real - def
+	return delta > 0 ? `+${delta}` : String(delta)
+}
+
 // --- SET commands ----------------------------------------------------------
 const P = (...b) => b // tiny helper to keep the table readable
 export const COMMANDS = {
@@ -429,10 +447,23 @@ export const COMMANDS = {
 	// black_red/green/blue's real range is signed -4096..4095 (ISP_BLS_MIN/MAX);
 	// kept at 3 nibbles (signed 12-bit, -2048..2047) with firmware scaling by 2
 	// to cover -4096..4094 -- odd values and 4095 itself are unreachable, an
-	// accepted precision tradeoff.
-	dct_black_red: { name: 'Black Red', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x04), nibbles: 3, signed: true },
-	dct_black_green: { name: 'Black Green', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x05), nibbles: 3, signed: true },
-	dct_black_blue: { name: 'Black Blue', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x06), nibbles: 3, signed: true },
+	// accepted precision tradeoff. `format` shows the delta from the real,
+	// per-ISP factory default (see formatBlackDelta/BLACK_DEFAULT_BY_MODEL
+	// above) instead of the raw wire value, display-only -- the knob's own
+	// stepping/encoding stays in wire units (same treatment as Contrast's
+	// raw-128 offset above: only the printed text changes).
+	dct_black_red: {
+		name: 'Black Red', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x04), nibbles: 3, signed: true,
+		format: formatBlackDelta,
+	},
+	dct_black_green: {
+		name: 'Black Green', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x05), nibbles: 3, signed: true,
+		format: formatBlackDelta,
+	},
+	dct_black_blue: {
+		name: 'Black Blue', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x06), nibbles: 3, signed: true,
+		format: formatBlackDelta,
+	},
 
 	// Flare's real signature is "flare <red> <green> <blue>" -- positional,
 	// all 3 needed on every set (do_flare has no single-channel form).

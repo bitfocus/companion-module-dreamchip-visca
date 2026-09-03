@@ -881,7 +881,12 @@ class DctViscaInstance extends InstanceBase {
 					// polling catches up mid-turn, looking like a spurious step back.
 					const v = this.knob[p.varId] !== undefined ? this.knob[p.varId] : this.state[p.varId]
 					const n = Number(v)
-					const text = p.format && Number.isFinite(n) ? p.format(n) : (v ?? '--')
+					// Second arg (this.cameraModel) is only consumed by format functions
+					// that need it (e.g. dct_black_red/green/blue's per-ISP factory
+					// default, see BLACK_DEFAULT_BY_MODEL in commands.js) -- every other
+					// format function ignores extra arguments, so this is safe to pass
+					// unconditionally.
+					const text = p.format && Number.isFinite(n) ? p.format(n, this.cameraModel) : (v ?? '--')
 					// Most params bar-position on the raw wire value; a few (e.g. Audio
 					// Gain) define a separate display-unit scale (barValue/barMin/barMax)
 					// so the bar reflects the same unit as the text above it -- e.g. 0dB
