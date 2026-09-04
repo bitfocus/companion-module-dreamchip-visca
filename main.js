@@ -4,6 +4,7 @@ import { KNOB_RING_PNG } from './images.js'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
 const GREEN = combineRgb(0, 102, 0)
+const RED = combineRgb(204, 0, 0)
 const BLUE = combineRgb(0, 51, 102)
 const ORANGE = combineRgb(255, 102, 0)
 const DIM_RED = combineRgb(102, 0, 0)
@@ -157,6 +158,11 @@ const KNOB_PRESS_SET_VALUE = {
 	dct_wb_temp: 6500, // common daylight white-balance reference, per user request
 	dct_audio_gain: 256, // per user request
 }
+
+// dct_tally_cycle's press order (main.js setupActions()) -- index == the
+// cycle position, not the wire value (see ENUM.dct_tally in commands.js
+// for the actual 0/1/2 wire encoding).
+const TALLY_CYCLE = ['Off', 'Red', 'Green']
 
 // `cam_settings_reset`/`dct_load_settings` change most camera parameters at
 // once as a side effect of one command; without a follow-up poll, every
@@ -478,6 +484,7 @@ class DctViscaInstance extends InstanceBase {
 		if (q.varId === 'dct_audio_enable') this.checkFeedbacks('dct_audio_enable_is', 'dct_audio_enable_display')
 		if (q.varId === 'dct_sdi_range') this.checkFeedbacks('dct_sdi_range_is', 'dct_sdi_range_display')
 		if (q.varId === 'dct_timecode_hold') this.checkFeedbacks('dct_timecode_hold_display')
+		if (q.varId === 'dct_tally') this.checkFeedbacks('dct_tally_is', 'dct_tally_display')
 		if (q.varId === 'version') {
 			const model = parseCameraModel(value)
 			if (model && model !== this.cameraModel) {
@@ -722,6 +729,23 @@ class DctViscaInstance extends InstanceBase {
 				this.confirmIfNotPolling('dct_timecode_hold')
 			},
 		}
+		// 3-state cycle, unlike the strict 2-way toggles above (which don't
+		// generalize past 2 states) -- unknown current state (-1, e.g. before
+		// the first poll) advances to index 0 "Off" rather than "Red", a safe
+		// starting point.
+		actions['dct_tally_cycle'] = {
+			name: 'Tally: Cycle Off/Red/Green',
+			options: [],
+			callback: () => {
+				const cur = TALLY_CYCLE.indexOf(this.state.dct_tally)
+				const next = TALLY_CYCLE[(cur + 1) % TALLY_CYCLE.length]
+				this.send(COMMANDS.dct_tally.choices[next])
+				this.state.dct_tally = next
+				this.setVariableValues({ dct_tally: next })
+				this.checkFeedbacks('dct_tally_is', 'dct_tally_display')
+				this.confirmIfNotPolling('dct_tally')
+			},
+		}
 		// AE/WB are genuinely 3-/5-choice enums (cam_ae, cam_wb above), unlike
 		// the strictly-binary toggles above -- these two additional toggles
 		// only ever flip between Auto and Manual (ignoring Shutter Pri /
@@ -829,6 +853,9 @@ class DctViscaInstance extends InstanceBase {
 		presets['timecode_hold_toggle'] = btn('System', 'Timecode: Toggle Run/Hold', 'TC\\n--', 'dct_timecode_hold_toggle', {}, [
 			{ feedbackId: 'dct_timecode_hold_display', options: {} },
 		])
+		presets['tally_cycle'] = btn('System', 'Tally: Cycle Off/Red/Green', 'Tally\\n--', 'dct_tally_cycle', {}, [
+			{ feedbackId: 'dct_tally_display', options: {} },
+		])
 		presets['cam_ae_toggle'] = btn('Exposure', 'AE: Toggle Auto/Manual', 'AE\\n--', 'cam_ae_toggle', {}, [
 			{ feedbackId: 'cam_ae_display', options: {} },
 		])
@@ -859,6 +886,7 @@ class DctViscaInstance extends InstanceBase {
 			wb_mode_is: modeFeedback('WB mode is', ENUM.wb, 'wb_mode'),
 			dct_audio_enable_is: modeFeedback('Audio Enable is', ENUM.dct_onoff, 'dct_audio_enable'),
 			dct_sdi_range_is: modeFeedback('SDI Range is', ENUM.dct_sdi_range, 'dct_sdi_range'),
+			dct_tally_is: modeFeedback('Tally is', ENUM.dct_tally, 'dct_tally'),
 			connected: {
 				type: 'boolean',
 				name: 'Connection OK',
@@ -927,6 +955,16 @@ class DctViscaInstance extends InstanceBase {
 				callback: () => {
 					const full = this.state.dct_sdi_range === 'Full'
 					return { text: `SDI\\n${full ? 'FULL' : 'LEGAL'}`, size: 'auto', bgcolor: full ? LIGHT_BLUE : BLUE, color: WHITE }
+				},
+			},
+			dct_tally_display: {
+				type: 'advanced',
+				name: 'Tally cycle (display)',
+				options: [],
+				callback: () => {
+					const state = this.state.dct_tally
+					const bgcolor = state === 'Red' ? RED : state === 'Green' ? GREEN : DARK_GRAY
+					return { text: `Tally\\n${(state ?? '--').toUpperCase()}`, size: 'auto', bgcolor, color: WHITE }
 				},
 			},
 			cam_ae_display: {
