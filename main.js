@@ -159,10 +159,19 @@ const KNOB_PRESS_SET_VALUE = {
 	dct_audio_gain: 256, // per user request
 }
 
-// dct_tally_cycle's press order (main.js setupActions()) -- index == the
-// cycle position, not the wire value (see ENUM.dct_tally in commands.js
-// for the actual 0/1/2 wire encoding).
-const TALLY_CYCLE = ['Off', 'Red', 'Green']
+// dct_tally_cycle's press order (main.js setupActions()); each state is the
+// pair of local booleans this.tally tracks. No VISCA inquiry exists for
+// either lamp (commands.js's dct_tally_red/dct_tally_green are set-only),
+// so this optimistic local pair -- not a polled this.state value -- is the
+// source of truth once the user starts pressing the button. Yellow (both
+// lamps on, sys_tally_light_t) is included as its own cycle stop, reached
+// by sending both Red On and Green On.
+const TALLY_CYCLE_STATES = [
+	{ red: false, green: false }, // Off
+	{ red: true, green: false }, // Red
+	{ red: false, green: true }, // Green
+	{ red: true, green: true }, // Yellow
+]
 
 // `cam_settings_reset`/`dct_load_settings` change most camera parameters at
 // once as a side effect of one command; without a follow-up poll, every
@@ -215,6 +224,7 @@ class DctViscaInstance extends InstanceBase {
 		this.consecutiveTimeouts = 0 // see markNoReply()/markReplyReceived()
 		this.linkWarning = false // true once we've downgraded Ok -> UnknownWarning for no replies
 		this.cameraModel = undefined // 'violetta'|'marietta'|undefined (unknown -> unrestricted), see MODEL_GATED_IDS
+		this.tally = { red: false, green: false } // optimistic local state, see TALLY_CYCLE_STATES/dct_tally_cycle (no VISCA inquiry exists to read this back)
 		this.params = continuousParams()
 		this.paramById = Object.fromEntries(this.params.map((p) => [p.id, p]))
 		this.availableSerialPorts = [] // cached SerialPort.list() entries ({path, vendorId, manufacturer}), for the config editor's Serial port dropdown
@@ -484,7 +494,6 @@ class DctViscaInstance extends InstanceBase {
 		if (q.varId === 'dct_audio_enable') this.checkFeedbacks('dct_audio_enable_is', 'dct_audio_enable_display')
 		if (q.varId === 'dct_sdi_range') this.checkFeedbacks('dct_sdi_range_is', 'dct_sdi_range_display')
 		if (q.varId === 'dct_timecode_hold') this.checkFeedbacks('dct_timecode_hold_display')
-		if (q.varId === 'dct_tally') this.checkFeedbacks('dct_tally_is', 'dct_tally_display')
 		if (q.varId === 'version') {
 			const model = parseCameraModel(value)
 			if (model && model !== this.cameraModel) {
@@ -729,21 +738,22 @@ class DctViscaInstance extends InstanceBase {
 				this.confirmIfNotPolling('dct_timecode_hold')
 			},
 		}
-		// 3-state cycle, unlike the strict 2-way toggles above (which don't
-		// generalize past 2 states) -- unknown current state (-1, e.g. before
-		// the first poll) advances to index 0 "Off" rather than "Red", a safe
-		// starting point.
+		// 4-state cycle over TALLY_CYCLE_STATES, unlike the strict 2-way
+		// toggles above (which don't generalize past 2 states). Red/Green are
+		// independent set-only commands with no inquiry, so this tracks
+		// this.tally locally rather than reading back camera state; unknown
+		// (-1, e.g. never pressed) advances to index 0 "Off", a safe start.
+		// Only sends the lamp(s) that actually change between states.
 		actions['dct_tally_cycle'] = {
-			name: 'Tally: Cycle Off/Red/Green',
+			name: 'Tally: Cycle Off/Red/Green/Yellow',
 			options: [],
 			callback: () => {
-				const cur = TALLY_CYCLE.indexOf(this.state.dct_tally)
-				const next = TALLY_CYCLE[(cur + 1) % TALLY_CYCLE.length]
-				this.send(COMMANDS.dct_tally.choices[next])
-				this.state.dct_tally = next
-				this.setVariableValues({ dct_tally: next })
-				this.checkFeedbacks('dct_tally_is', 'dct_tally_display')
-				this.confirmIfNotPolling('dct_tally')
+				const cur = TALLY_CYCLE_STATES.findIndex((s) => s.red === this.tally.red && s.green === this.tally.green)
+				const next = TALLY_CYCLE_STATES[(cur + 1) % TALLY_CYCLE_STATES.length]
+				if (next.red !== this.tally.red) this.send(COMMANDS.dct_tally_red.choices[next.red ? 'On' : 'Off'])
+				if (next.green !== this.tally.green) this.send(COMMANDS.dct_tally_green.choices[next.green ? 'On' : 'Off'])
+				this.tally = next
+				this.checkFeedbacks('dct_tally_display')
 			},
 		}
 		// AE/WB are genuinely 3-/5-choice enums (cam_ae, cam_wb above), unlike
@@ -853,7 +863,7 @@ class DctViscaInstance extends InstanceBase {
 		presets['timecode_hold_toggle'] = btn('System', 'Timecode: Toggle Run/Hold', 'TC\\n--', 'dct_timecode_hold_toggle', {}, [
 			{ feedbackId: 'dct_timecode_hold_display', options: {} },
 		])
-		presets['tally_cycle'] = btn('System', 'Tally: Cycle Off/Red/Green', 'Tally\\n--', 'dct_tally_cycle', {}, [
+		presets['tally_cycle'] = btn('System', 'Tally: Cycle Off/Red/Green/Yellow', 'Tally\\n--', 'dct_tally_cycle', {}, [
 			{ feedbackId: 'dct_tally_display', options: {} },
 		])
 		presets['cam_ae_toggle'] = btn('Exposure', 'AE: Toggle Auto/Manual', 'AE\\n--', 'cam_ae_toggle', {}, [
@@ -886,7 +896,6 @@ class DctViscaInstance extends InstanceBase {
 			wb_mode_is: modeFeedback('WB mode is', ENUM.wb, 'wb_mode'),
 			dct_audio_enable_is: modeFeedback('Audio Enable is', ENUM.dct_onoff, 'dct_audio_enable'),
 			dct_sdi_range_is: modeFeedback('SDI Range is', ENUM.dct_sdi_range, 'dct_sdi_range'),
-			dct_tally_is: modeFeedback('Tally is', ENUM.dct_tally, 'dct_tally'),
 			connected: {
 				type: 'boolean',
 				name: 'Connection OK',
@@ -962,9 +971,10 @@ class DctViscaInstance extends InstanceBase {
 				name: 'Tally cycle (display)',
 				options: [],
 				callback: () => {
-					const state = this.state.dct_tally
-					const bgcolor = state === 'Red' ? RED : state === 'Green' ? GREEN : DARK_GRAY
-					return { text: `Tally\\n${(state ?? '--').toUpperCase()}`, size: 'auto', bgcolor, color: WHITE }
+					const { red, green } = this.tally
+					const label = red && green ? 'YELLOW' : red ? 'RED' : green ? 'GREEN' : 'OFF'
+					const bgcolor = red && green ? ORANGE : red ? RED : green ? GREEN : DARK_GRAY
+					return { text: `Tally\\n${label}`, size: 'auto', bgcolor, color: WHITE }
 				},
 			},
 			cam_ae_display: {

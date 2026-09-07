@@ -27,11 +27,6 @@ export const ENUM = {
 	// do_sdi_range's own help text: "<flag> - set sdi range [0: legal, 1: full range]"
 	dct_sdi_range: { 0x00: 'Legal', 0x01: 'Full' },
 	dct_timecode_hold: { 0x00: 'Run', 0x01: 'Hold' },
-	// VISCA wire values only (0=off,1=red,2=green) -- the firmware's real
-	// tally enum also has Yellow(1)/Red(3)/Green(2), but VISCA translates
-	// to/from this narrower 3-value contract (doc/VISCA.md), so Yellow is
-	// never seen here.
-	dct_tally: { 0x00: 'Off', 0x01: 'Red', 0x02: 'Green' },
 }
 
 // video_mode -> [b2, b3] for cam_system (8x 01 04 24 00 00 b2 b3 FF).
@@ -569,10 +564,15 @@ export const COMMANDS = {
 	// outside that with -EINVAL); same treatment as sdi_black above.
 	dct_sdi_white: { name: 'SDI White', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x32), nibbles: 2, signed: true, min: -80, max: 79 },
 
-	// Wire values only (0=off,1=red,2=green, doc/VISCA.md) -- the firmware
-	// translates to/from the real 4-value sys_tally_light_t enum (which
-	// also has Yellow), so Yellow is never reachable over VISCA by design.
-	dct_tally: { name: 'Tally', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x50, 0x00), Red: P(0x01, 0x7e, 0x01, 0x50, 0x01), Green: P(0x01, 0x7e, 0x01, 0x50, 0x02) } },
+	// Independent Red/Green tally lamps -- set-only (no inquiry given).
+	// p: 2=On, 3=Off (standard VISCA on/off convention, not this module's
+	// own usual 0/1 enum style -- matches the real wire spec exactly).
+	// Yellow = both lamps on (sys_tally_light_t, driver/src/tally.c),
+	// reached by sending Red On + Green On -- not a wire value of its own.
+	dct_tally_red: { name: 'Tally Red', group: 'System', kind: 'enum', choices: { On: P(0x01, 0x7e, 0x01, 0x0a, 0x00, 0x02), Off: P(0x01, 0x7e, 0x01, 0x0a, 0x00, 0x03) } },
+	// Second DCT sub-namespace (0x04, not 0x01) -- avoids colliding with
+	// dct_aec_maxgain at SS 0x1A in the normal sub-namespace.
+	dct_tally_green: { name: 'Tally Green', group: 'System', kind: 'enum', choices: { On: P(0x01, 0x7e, 0x04, 0x1a, 0x00, 0x02), Off: P(0x01, 0x7e, 0x04, 0x1a, 0x00, 0x03) } },
 
 	dct_audio_enable: { name: 'Audio Enable', group: 'Audio', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x65, 0x00), On: P(0x01, 0x7e, 0x01, 0x65, 0x01) } },
 	// audio_gain's real range is 0-65535 (4.12 fixed-point, 4096 = 1.0x unity
@@ -708,10 +708,6 @@ export const INQUIRIES = {
 	dct_sdi_range: { name: 'SDI Range', varId: 'dct_sdi_range', payload: P(0x09, 0x7e, 0x01, 0x30), decode: { type: 'enum', map: ENUM.dct_sdi_range } },
 	dct_sdi_black: { name: 'SDI Black', varId: 'dct_sdi_black', payload: P(0x09, 0x7e, 0x01, 0x31), decode: { type: 'value', signed: true }, once: true },
 	dct_sdi_white: { name: 'SDI White', varId: 'dct_sdi_white', payload: P(0x09, 0x7e, 0x01, 0x32), decode: { type: 'value', signed: true }, once: true },
-	// Not once:true, same reasoning as dct_sdi_range above: tally state can
-	// change from elsewhere (e.g. a switcher's tally bus), not just from
-	// Companion, so the cycling button's display needs live polling.
-	dct_tally: { name: 'Tally', varId: 'dct_tally', payload: P(0x09, 0x7e, 0x01, 0x50), decode: { type: 'enum', map: ENUM.dct_tally } },
 	dct_mcc_opmode: { name: 'MCC Op-Mode', varId: 'dct_mcc_opmode', payload: P(0x09, 0x7e, 0x01, 0x40), decode: { type: 'value' }, once: true },
 	dct_osd: { name: 'OSD', varId: 'dct_osd', payload: P(0x09, 0x7e, 0x01, 0x52), decode: { type: 'enum', map: ENUM.dct_onoff }, once: true },
 	dct_auto_save: { name: 'Auto Save', varId: 'dct_auto_save', payload: P(0x09, 0x7e, 0x01, 0x62), decode: { type: 'enum', map: ENUM.dct_onoff }, once: true },
