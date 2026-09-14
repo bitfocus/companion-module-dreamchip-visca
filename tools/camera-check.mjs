@@ -4,14 +4,23 @@
 // round-trip via the paired inquiry). NOT part of `npm test` -- node --test
 // won't discover this file, and it requires real hardware attached.
 //
-// Disables AEC/AWB before the run (manual gain/exposure/WB-gain tests need
-// them off to hold a set value) and, once the run finishes, turns AEC/AWB
-// back on and resets settings -- regardless of what was running before the
-// test started; `reset_settings` is always the last command sent. Each
-// command's bytes are fully flushed to the wire (port.write + port.drain)
-// before waiting for its reply, and the next command isn't sent until that
-// reply (or timeout) arrives -- a strictly one-at-a-time, synchronous
-// send/wait sequence, no artificial delay needed between commands.
+// Queries version_inq right after connecting to detect which camera model
+// is attached (mirrors main.js's own model detection) and excludes commands
+// that don't exist on that model (see MODEL_GATED_IDS below) -- otherwise
+// e.g. Gain Mode/CNR (Violetta-only) or Tone Mapping Mode/DPF (Marietta-only)
+// show up as spurious ERROR 0x41 failures on the other model.
+//
+// Sends `reset_settings` once at the very start (so the run begins from a
+// known state regardless of what a prior session left behind) and again,
+// unconditionally, once the run finishes. Disables AEC/AWB before the run
+// (manual gain/exposure/WB-gain tests need them off to hold a set value)
+// and, once the run finishes, turns AEC/AWB back on and resets settings --
+// regardless of what was running before the test started; `reset_settings`
+// is always the last command sent. Each command's bytes are fully flushed to
+// the wire (port.write + port.drain) before waiting for its reply, and the
+// next command isn't sent until that reply (or timeout) arrives -- a
+// strictly one-at-a-time, synchronous send/wait sequence, no artificial
+// delay needed between commands.
 //
 // Usage:
 //   VISCA_TEST_PORT=/dev/ttyUSB0 node tools/camera-check.mjs
@@ -185,6 +194,37 @@ const SHUTTER_SPOT_CHECK = [8000, 500, 30]
 // --include-destructive.
 const DESTRUCTIVE_IDS = new Set(['cam_settings_save', 'cam_settings_reset', 'dct_load_settings', 'cam_system'])
 
+// Known-unimplemented on real hardware (ERROR 0x41 regardless of camera
+// model) -- excluded so it doesn't show up as FAIL noise in every run.
+const SKIPPED_IDS = new Set(['cam_bright_direct'])
+
+// version_inq's model-id field (doc/VISCA.md "HH HH"; commands.js's 'version'
+// decode formats it as "...model=0x0000..."/"...model=0x0001..."). Mirrors
+// main.js's own CAMERA_MODEL_BY_ID/parseCameraModel -- see visca_map_system.c's
+// version_inq handler in the BSP.
+const CAMERA_MODEL_BY_ID = { '0000': 'violetta', '0001': 'marietta' }
+function parseCameraModel(versionText) {
+	const m = /model=0x([0-9a-f]+)/i.exec(versionText ?? '')
+	return m ? CAMERA_MODEL_BY_ID[m[1].padStart(4, '0').toLowerCase()] : undefined
+}
+
+// Commands that don't exist on one of the two camera product lines (confirmed:
+// dpf_strength/tm_mode genuinely require the Phoenix ISP, i.e. Marietta-only,
+// so both are unusable on Violetta; gain_mode/cnr require the ProVideo ISP,
+// i.e. Violetta-only, so both are unusable on Marietta) -- attempting them on
+// the wrong model always fails with VISCA_ERR_NOT_EXECUTABLE (0x41), which is
+// noise, not a real regression, so they're excluded from that model's run.
+// Superset of main.js's own MODEL_GATED_IDS: main.js's `marietta` entry
+// doesn't currently gate `dct_cnr_auto`/`dct_cnr_mode` in the Companion UI --
+// a separate, pre-existing gap there, left untouched by this change.
+// Unknown model (inquiry failed, or an id this table doesn't recognize) means
+// unrestricted, same fallback main.js uses -- a slow/old-firmware version
+// reply never silently drops test coverage.
+const MODEL_GATED_IDS = {
+	violetta: ['dct_tm_mode', 'dct_tm_mode_preset', 'dct_dpf_strength'],
+	marietta: ['dct_gain_mode', 'dct_cnr_auto', 'dct_cnr_mode'],
+}
+
 // varId derivation for `direct` commands (mirrors continuousParams()' own rule).
 function directVarId(id) {
 	const base = id.endsWith('_direct') ? id.slice(0, -'_direct'.length) : id
@@ -210,11 +250,14 @@ function pickTestValue(min, max) {
 const DEFERRED_ORDER = ['cam_gamma', 'cam_ae', 'cam_wb']
 
 // --- build the test case list (same enumeration as tools/testplan generation) ---
-function buildCases() {
+function buildCases(model) {
+	const gatedIds = MODEL_GATED_IDS[model] ?? []
 	const main = []
 	const deferred = []
 	for (const [id, c] of Object.entries(COMMANDS)) {
 		if (!includeDestructive && DESTRUCTIVE_IDS.has(id)) continue
+		if (SKIPPED_IDS.has(id)) continue
+		if (gatedIds.includes(id)) continue // doesn't exist on the connected model
 		if (c.kind === 'video') continue // disrupts a live signal; not covered here
 		if (groupFilter && c.group !== groupFilter) continue
 		if (onlyFilter && !id.includes(onlyFilter) && !c.name.includes(onlyFilter)) continue
@@ -432,8 +475,7 @@ async function withAutoModesDisabled(fn) {
 
 // --- run ---------------------------------------------------------------
 async function main() {
-	const cases = buildCases()
-	console.log(`${cases.length} test case(s) queued${includeDestructive ? ' [destructive included]' : ''}. Connecting to ${PORT}...`)
+	console.log(`Connecting to ${PORT}...`)
 
 	await new Promise((resolve, reject) => {
 		port.open((err) => (err ? reject(err) : resolve()))
@@ -445,6 +487,18 @@ async function main() {
 	}
 	port.on('data', onData)
 	console.log(`Connected. Running against camera address ${ADDR}...\n`)
+
+	// reset_settings is always the very first command sent, before anything
+	// else (including the version inquiry below) touches the camera.
+	const startReset = await setCommand(COMMANDS.cam_settings_reset.bytes)
+	console.log(startReset.ok ? 'reset_settings: ok' : `reset_settings: ${describeFailure(startReset)}`)
+
+	const versionInq = await inquire('version')
+	const model = versionInq.ok ? parseCameraModel(versionInq.value) : undefined
+	console.log(model ? `Detected camera model: ${model}` : 'Camera model: unknown (no restrictions applied)')
+
+	const cases = buildCases(model)
+	console.log(`${cases.length} test case(s) queued${includeDestructive ? ' [destructive included]' : ''}.`)
 
 	let pass = 0
 	let fail = 0
