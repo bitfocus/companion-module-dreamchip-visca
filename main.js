@@ -4,6 +4,7 @@ import { KNOB_RING_PNG } from './images.js'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
 const GREEN = combineRgb(0, 102, 0)
+const RED = combineRgb(204, 0, 0)
 const BLUE = combineRgb(0, 51, 102)
 const ORANGE = combineRgb(255, 102, 0)
 const DIM_RED = combineRgb(102, 0, 0)
@@ -19,15 +20,21 @@ const WHITE = combineRgb(255, 255, 255)
 // Per-preset background overrides, applied after generation (default is BLUE
 // from the shared btn() helper). Orange calls out the 3 "hands control back
 // to the camera's auto algorithms / wipes settings" buttons; dim red/green/
-// blue color-codes the R/G/B gain reset buttons and their knob presets to
-// match the channel they act on.
+// blue color-codes the R/G/B gain reset/up/down buttons and their knob
+// presets to match the channel they act on.
 const PRESET_BGCOLOR_OVERRIDES = {
 	cam_settings_reset: ORANGE,
 	cam_wb_Auto: ORANGE,
 	cam_ae_Auto: ORANGE,
 	cam_rgain_reset: DIM_RED,
+	cam_rgain_up: DIM_RED,
+	cam_rgain_down: DIM_RED,
 	cam_bgain_reset: DIM_BLUE,
+	cam_bgain_up: DIM_BLUE,
+	cam_bgain_down: DIM_BLUE,
 	dct_ggain_Reset: DIM_GREEN,
+	dct_ggain_Up: DIM_GREEN,
+	dct_ggain_Down: DIM_GREEN,
 	knob_cam_rgain_direct: DIM_RED,
 	knob_cam_bgain_direct: DIM_BLUE,
 	knob_dct_ggain_direct: DIM_GREEN,
@@ -58,12 +65,17 @@ const PRESET_BGCOLOR_OVERRIDES = {
 const RUD_INQUIRY_ID = { cam_gain: 'gain', cam_shutter: 'shutter', cam_rgain: 'rgain', cam_bgain: 'bgain', cam_bright: 'bright' }
 
 // enum COMMANDS ids whose plain per-choice buttons (not just their dedicated
-// toggle action) should also confirmIfNotPolling() after sending -- these 3
+// toggle action) should also confirmIfNotPolling() after sending -- these
 // stayed on the continuous poll tier specifically so their toggle buttons'
 // live status stays accurate; the plain "SDI Range: Legal"/"Audio Enable:
-// On"/"Timecode: Run"-style buttons set the exact same value, so they need
-// the same confirmation when auto poll is off.
-const CONFIRM_POLL_ENUM_IDS = new Set(['dct_sdi_range', 'dct_timecode_hold', 'dct_audio_enable'])
+// On"/"Timecode: Run"/"AE: Auto"/"WB: Manual"-style buttons set the exact
+// same value, so they need the same confirmation when auto poll is off.
+const CONFIRM_POLL_ENUM_IDS = new Set(['dct_sdi_range', 'dct_timecode_hold', 'dct_audio_enable', 'cam_ae', 'cam_wb'])
+// CONFIRM_POLL_ENUM_IDS is keyed by COMMANDS id (what the generic enum
+// callback below has in scope), but confirmIfNotPolling() needs an INQUIRIES
+// id -- for dct_sdi_range/dct_timecode_hold/dct_audio_enable those are the
+// same string, but cam_ae/cam_wb's inquiries are named ae_mode/wb_mode.
+const CONFIRM_POLL_INQUIRY_ID = { cam_ae: 'ae_mode', cam_wb: 'wb_mode' }
 
 // dct_ggain (kind:'enum', choices Reset/Up/Down) is semantically a RUD-style
 // gain_green control -- it just uses DCT-extension byte payloads instead of
@@ -72,6 +84,52 @@ const CONFIRM_POLL_ENUM_IDS = new Set(['dct_sdi_range', 'dct_timecode_hold', 'dc
 // confirm+resync treatment as cam_rgain/cam_bgain (below), which it otherwise
 // wouldn't get at all.
 const ENUM_RUD_INQUIRY_ID = { dct_ggain: 'dct_ggain' }
+
+// enum COMMANDS ids that are purely a named-shortcut UI for a sibling
+// `direct`-kind knob (dct_tm_mode_preset -> dct_tm_mode, dct_color_space_preset
+// -> dct_color_space, same idea as Gain (ISO)/Shutter (Speed) but via 'enum'
+// instead of a curated table) -- pressing one of these buttons sends an exact,
+// deterministically-known value (unlike a RUD reset), so it can write the
+// sibling knob/state immediately instead of waiting on the next poll, which
+// would otherwise never happen at all for a `once:true` (startup-only) param
+// like these two. The raw value is the choice's position in `choices`
+// (insertion order == wire value 0,1,2... for both of these).
+const PRESET_KNOB_TARGET = { dct_tm_mode_preset: 'dct_tm_mode', dct_color_space_preset: 'dct_color_space' }
+
+// The firmware itself forces AE/AWB into Manual as a side effect of setting
+// these varIds (ae_ensure_manual()/visca_wb_ensure_manual() in the BSP's
+// VISCA layer -- same "the auto algorithm would silently overwrite this on
+// the next frame otherwise" reasoning for both), but nothing on the Companion
+// side otherwise knows that happened -- the AE/WB toggle buttons would keep
+// showing stale AUTO until the next full poll cycle (or forever, with
+// polling off). Re-confirm the affected mode right after any of these varIds
+// is deliberately written (see setKnobValue() and applyInquiryReply()'s
+// resyncKnob branch below).
+const MODE_SIDE_EFFECT_INQUIRY = { gain: 'ae_mode', shutter: 'ae_mode', rgain: 'wb_mode', bgain: 'wb_mode', dct_ggain: 'wb_mode', dct_wb_temp: 'wb_mode' }
+
+// version_inq's model-id field (doc/VISCA.md "HH HH"; commands.js's 'version'
+// decode formats it as "...model=0x0000..."/"...model=0x0001..."). Camera
+// firmware distinguishes Violetta (ProVideo ISP) vs Marietta (Phoenix ISP)
+// this way -- see visca_map_system.c's version_inq handler in the BSP.
+const CAMERA_MODEL_BY_ID = { '0000': 'violetta', '0001': 'marietta' }
+function parseCameraModel(versionText) {
+	const m = /model=0x([0-9a-f]+)/i.exec(versionText ?? '')
+	return m ? CAMERA_MODEL_BY_ID[m[1].padStart(4, '0').toLowerCase()] : undefined
+}
+
+// Commands/presets that don't apply to one of the two camera product lines
+// (confirmed: dpf_denoise/tm_mode genuinely require the Phoenix ISP, i.e.
+// Marietta-only, so both are unusable -- and thus hidden -- on Violetta;
+// filter_enable/filter_denoise/gain_mode are hidden on Marietta per product
+// decision). Applied in setupActions()/setupPresets() and the poll filters
+// once the camera's model is known (see this.cameraModel, set from
+// applyInquiryReply()'s version-reply hook) -- unknown model means
+// unrestricted, so a camera whose firmware predates this model-id fix (or a
+// failed/slow version poll) never has controls incorrectly hidden.
+const MODEL_GATED_IDS = {
+	violetta: ['dct_dpf_strength', 'dct_tm_mode', 'dct_tm_mode_preset'],
+	marietta: ['dct_filter_enable', 'dct_filter_denoise', 'dct_gain_mode'],
+}
 
 // Knobs whose real command already has a proper RUD "Reset" (server-side
 // target, confirmed via RUD_INQUIRY_ID's unconditional resyncKnob confirm-
@@ -100,6 +158,20 @@ const KNOB_PRESS_SET_VALUE = {
 	dct_wb_temp: 6500, // common daylight white-balance reference, per user request
 	dct_audio_gain: 256, // per user request
 }
+
+// dct_tally_cycle's press order (main.js setupActions()); each state is the
+// pair of local booleans this.tally tracks. No VISCA inquiry exists for
+// either lamp (commands.js's dct_tally_red/dct_tally_green are set-only),
+// so this optimistic local pair -- not a polled this.state value -- is the
+// source of truth once the user starts pressing the button. Yellow (both
+// lamps on, sys_tally_light_t) is included as its own cycle stop, reached
+// by sending both Red On and Green On.
+const TALLY_CYCLE_STATES = [
+	{ red: false, green: false }, // Off
+	{ red: true, green: false }, // Red
+	{ red: false, green: true }, // Green
+	{ red: true, green: true }, // Yellow
+]
 
 // `cam_settings_reset`/`dct_load_settings` change most camera parameters at
 // once as a side effect of one command; without a follow-up poll, every
@@ -149,6 +221,10 @@ class DctViscaInstance extends InstanceBase {
 		this.rxbuf = Buffer.alloc(0)
 		this.knob = {} // per-varId knob target (relative-adjust state)
 		this.knobLockUntil = {} // per-varId: Date.now() ms until which background polling won't resync this.knob (see setKnobValue())
+		this.consecutiveTimeouts = 0 // see markNoReply()/markReplyReceived()
+		this.linkWarning = false // true once we've downgraded Ok -> UnknownWarning for no replies
+		this.cameraModel = undefined // 'violetta'|'marietta'|undefined (unknown -> unrestricted), see MODEL_GATED_IDS
+		this.tally = { red: false, green: false } // optimistic local state, see TALLY_CYCLE_STATES/dct_tally_cycle (no VISCA inquiry exists to read this back)
 		this.params = continuousParams()
 		this.paramById = Object.fromEntries(this.params.map((p) => [p.id, p]))
 		this.availableSerialPorts = [] // cached SerialPort.list() entries ({path, vendorId, manufacturer}), for the config editor's Serial port dropdown
@@ -195,10 +271,39 @@ class DctViscaInstance extends InstanceBase {
 
 	// --- transport ---------------------------------------------------------
 	async initTransport() {
+		this.consecutiveTimeouts = 0
+		this.linkWarning = false
 		if (this.config?.conn === 'serial') {
 			await this.initSerial()
 		} else {
 			this.initTCP()
+		}
+	}
+
+	// A terminal reply (Completion 0x50 or Error 0x60 -- see handleFrame())
+	// proves something is actually answering on the wire. Promotes back to
+	// Ok if markNoReply() had previously downgraded to Warning.
+	markReplyReceived() {
+		this.consecutiveTimeouts = 0
+		if (this.linkWarning) {
+			this.linkWarning = false
+			this.updateStatus(InstanceStatus.Ok)
+		}
+	}
+
+	// pump()'s per-command timeout fires when nothing came back at all. A
+	// serial port can "open" successfully with no adapter/camera on the
+	// other end at all -- a bare UART has no way to detect a peer -- and a
+	// TCP connect is no guarantee either if something else is listening on
+	// that port. Only downgrades while the transport itself still thinks
+	// it's connected, so a real disconnect's own (more specific) status
+	// always wins over this.
+	markNoReply() {
+		if (!this.socket?.isConnected) return
+		this.consecutiveTimeouts++
+		if (this.consecutiveTimeouts >= 2 && !this.linkWarning) {
+			this.linkWarning = true
+			this.updateStatus(InstanceStatus.UnknownWarning, 'No response from camera')
 		}
 	}
 
@@ -317,6 +422,7 @@ class DctViscaInstance extends InstanceBase {
 		const kind = frame[1] & 0xf0
 		// ACK (0x40) is not terminal; Completion/inquiry-reply (0x50) and error (0x60) are.
 		if (kind === 0x50 || kind === 0x60) {
+			this.markReplyReceived()
 			const entry = this.inflight
 			this.inflight = null
 			if (entry?.timer) clearTimeout(entry.timer)
@@ -341,6 +447,7 @@ class DctViscaInstance extends InstanceBase {
 		entry.timer = setTimeout(() => {
 			if (this.inflight === entry) {
 				this.inflight = null
+				this.markNoReply()
 				this.pump()
 			}
 		}, 1500)
@@ -375,11 +482,26 @@ class DctViscaInstance extends InstanceBase {
 			const locked = (this.knobLockUntil[q.varId] ?? 0) > Date.now()
 			if (Number.isFinite(n) && (opts.resyncKnob || !locked)) this.knob[q.varId] = n
 		}
-		if (q.varId === 'ae_mode') this.checkFeedbacks('ae_mode_is')
-		if (q.varId === 'wb_mode') this.checkFeedbacks('wb_mode_is')
+		// Same AE/AWB-forced-manual side effect as setKnobValue() -- this
+		// covers the RUD/enum confirm-read path (Gain/Shutter/Red/Blue/Green
+		// Gain Reset/Up/Down), which never calls setKnobValue() itself.
+		// resyncKnob-gated for the same reason as the knob resync above: only
+		// a deliberate confirm-read, never a routine background poll of
+		// gain/shutter/rgain/bgain/dct_ggain themselves.
+		if (opts.resyncKnob && MODE_SIDE_EFFECT_INQUIRY[q.varId]) this.confirmIfNotPolling(MODE_SIDE_EFFECT_INQUIRY[q.varId])
+		if (q.varId === 'ae_mode') this.checkFeedbacks('ae_mode_is', 'cam_ae_display')
+		if (q.varId === 'wb_mode') this.checkFeedbacks('wb_mode_is', 'cam_wb_display')
 		if (q.varId === 'dct_audio_enable') this.checkFeedbacks('dct_audio_enable_is', 'dct_audio_enable_display')
 		if (q.varId === 'dct_sdi_range') this.checkFeedbacks('dct_sdi_range_is', 'dct_sdi_range_display')
 		if (q.varId === 'dct_timecode_hold') this.checkFeedbacks('dct_timecode_hold_display')
+		if (q.varId === 'version') {
+			const model = parseCameraModel(value)
+			if (model && model !== this.cameraModel) {
+				this.cameraModel = model
+				this.setupActions()
+				this.setupPresets()
+			}
+		}
 		this.checkFeedbacks('knob_value')
 		this.checkFeedbacks('wb_measure_display')
 	}
@@ -423,6 +545,8 @@ class DctViscaInstance extends InstanceBase {
 		this.setVariableValues({ [varId]: String(value) })
 		this.knobLockUntil[varId] = Date.now() + KNOB_LOCK_MS
 		this.checkFeedbacks('knob_value')
+		const modeId = MODE_SIDE_EFFECT_INQUIRY[varId]
+		if (modeId) this.confirmIfNotPolling(modeId)
 	}
 
 	// Rotary-knob adjust: clamp, send an absolute `direct` set for the param, and
@@ -461,16 +585,20 @@ class DctViscaInstance extends InstanceBase {
 	// --- actions -----------------------------------------------------------
 	setupActions() {
 		const actions = {}
+		const gatedIds = MODEL_GATED_IDS[this.cameraModel] ?? []
 		for (const [id, c] of Object.entries(COMMANDS)) {
+			if (gatedIds.includes(id)) continue
 			const a = { name: `${c.group}: ${c.name}`, options: [] }
 			if (c.kind === 'enum') {
 				const ids = Object.keys(c.choices)
 				a.options = [{ type: 'dropdown', id: 'choice', label: c.name, default: ids[0], choices: ids.map((x) => ({ id: x, label: x })) }]
 				a.callback = (ev) => {
 					this.send(c.choices[ev.options.choice])
-					if (CONFIRM_POLL_ENUM_IDS.has(id)) this.confirmIfNotPolling(id)
+					if (CONFIRM_POLL_ENUM_IDS.has(id)) this.confirmIfNotPolling(CONFIRM_POLL_INQUIRY_ID[id] ?? id)
 					const rudQId = ENUM_RUD_INQUIRY_ID[id]
 					if (rudQId) this.inquireOnce(rudQId, { resyncKnob: true })
+					const knobVarId = PRESET_KNOB_TARGET[id]
+					if (knobVarId) this.setKnobValue(knobVarId, ids.indexOf(ev.options.choice))
 				}
 			} else if (c.kind === 'rud') {
 				const rudChoices = c.rudChoices ?? Object.keys(RUD)
@@ -610,6 +738,53 @@ class DctViscaInstance extends InstanceBase {
 				this.confirmIfNotPolling('dct_timecode_hold')
 			},
 		}
+		// 4-state cycle over TALLY_CYCLE_STATES, unlike the strict 2-way
+		// toggles above (which don't generalize past 2 states). Red/Green are
+		// independent set-only commands with no inquiry, so this tracks
+		// this.tally locally rather than reading back camera state; unknown
+		// (-1, e.g. never pressed) advances to index 0 "Off", a safe start.
+		// Only sends the lamp(s) that actually change between states.
+		actions['dct_tally_cycle'] = {
+			name: 'Tally: Cycle Off/Red/Green/Yellow',
+			options: [],
+			callback: () => {
+				const cur = TALLY_CYCLE_STATES.findIndex((s) => s.red === this.tally.red && s.green === this.tally.green)
+				const next = TALLY_CYCLE_STATES[(cur + 1) % TALLY_CYCLE_STATES.length]
+				if (next.red !== this.tally.red) this.send(COMMANDS.dct_tally_red.choices[next.red ? 'On' : 'Off'])
+				if (next.green !== this.tally.green) this.send(COMMANDS.dct_tally_green.choices[next.green ? 'On' : 'Off'])
+				this.tally = next
+				this.checkFeedbacks('dct_tally_display')
+			},
+		}
+		// AE/WB are genuinely 3-/5-choice enums (cam_ae, cam_wb above), unlike
+		// the strictly-binary toggles above -- these two additional toggles
+		// only ever flip between Auto and Manual (ignoring Shutter Pri /
+		// Indoor / Outdoor / Trigger, all still reachable via their own
+		// existing per-choice buttons).
+		actions['cam_ae_toggle'] = {
+			name: 'AE: Toggle Auto/Manual',
+			options: [],
+			callback: () => {
+				const goManual = this.state.ae_mode !== 'Manual'
+				this.send(COMMANDS.cam_ae.choices[goManual ? 'Manual' : 'Auto'])
+				this.state.ae_mode = goManual ? 'Manual' : 'Auto'
+				this.setVariableValues({ ae_mode: this.state.ae_mode })
+				this.checkFeedbacks('ae_mode_is', 'cam_ae_display')
+				this.confirmIfNotPolling('ae_mode')
+			},
+		}
+		actions['cam_wb_toggle'] = {
+			name: 'WB: Toggle Auto/Manual',
+			options: [],
+			callback: () => {
+				const goManual = this.state.wb_mode !== 'Manual'
+				this.send(COMMANDS.cam_wb.choices[goManual ? 'Manual' : 'Auto'])
+				this.state.wb_mode = goManual ? 'Manual' : 'Auto'
+				this.setVariableValues({ wb_mode: this.state.wb_mode })
+				this.checkFeedbacks('wb_mode_is', 'cam_wb_display')
+				this.confirmIfNotPolling('wb_mode')
+			},
+		}
 		this.setActionDefinitions(actions)
 	}
 
@@ -624,7 +799,9 @@ class DctViscaInstance extends InstanceBase {
 			steps: [{ down: [{ actionId, options }], up: [] }],
 			feedbacks,
 		})
+		const gatedIds = MODEL_GATED_IDS[this.cameraModel] ?? []
 		for (const [id, c] of Object.entries(COMMANDS)) {
+			if (gatedIds.includes(id)) continue
 			if (c.kind === 'enum') {
 				for (const choice of Object.keys(c.choices)) {
 					presets[`${id}_${choice}`] = btn(c.group, `${c.name}: ${choice}`, `${c.name}\\n${choice}`, id, { choice })
@@ -652,6 +829,7 @@ class DctViscaInstance extends InstanceBase {
 		}
 		// Rotary-encoder (Stream Deck+) knobs: turn = adjust +/- step, press = sync.
 		for (const p of this.params) {
+			if (gatedIds.includes(p.id)) continue
 			const step = p.step ?? (p.max <= 15 ? 1 : this.knobStep())
 			presets[`knob_${p.id}`] = {
 				type: 'button',
@@ -684,6 +862,15 @@ class DctViscaInstance extends InstanceBase {
 		])
 		presets['timecode_hold_toggle'] = btn('System', 'Timecode: Toggle Run/Hold', 'TC\\n--', 'dct_timecode_hold_toggle', {}, [
 			{ feedbackId: 'dct_timecode_hold_display', options: {} },
+		])
+		presets['tally_cycle'] = btn('System', 'Tally: Cycle Off/Red/Green/Yellow', 'Tally\\n--', 'dct_tally_cycle', {}, [
+			{ feedbackId: 'dct_tally_display', options: {} },
+		])
+		presets['cam_ae_toggle'] = btn('Exposure', 'AE: Toggle Auto/Manual', 'AE\\n--', 'cam_ae_toggle', {}, [
+			{ feedbackId: 'cam_ae_display', options: {} },
+		])
+		presets['cam_wb_toggle'] = btn('White Balance', 'WB: Toggle Auto/Manual', 'WB\\n--', 'cam_wb_toggle', {}, [
+			{ feedbackId: 'cam_wb_display', options: {} },
 		])
 		for (const [id, bgcolor] of Object.entries(PRESET_BGCOLOR_OVERRIDES)) {
 			if (presets[id]) presets[id].style.bgcolor = bgcolor
@@ -730,8 +917,26 @@ class DctViscaInstance extends InstanceBase {
 					// otherwise the display can show an older, lower number while
 					// polling catches up mid-turn, looking like a spurious step back.
 					const v = this.knob[p.varId] !== undefined ? this.knob[p.varId] : this.state[p.varId]
-					const bar = progressBar(Number(v), p.min, p.max)
-					return { text: `${p.name}\\n${v ?? '--'}\\n${bar}`, size: 'auto' }
+					const n = Number(v)
+					// Second arg (this.cameraModel) is only consumed by format functions
+					// that need it (e.g. dct_black_red/green/blue's per-ISP factory
+					// default, see BLACK_DEFAULT_BY_MODEL in commands.js) -- every other
+					// format function ignores extra arguments, so this is safe to pass
+					// unconditionally.
+					const text = p.format && Number.isFinite(n) ? p.format(n, this.cameraModel) : (v ?? '--')
+					// Most params bar-position on the raw wire value; a few (e.g. Audio
+					// Gain) define a separate display-unit scale (barValue/barMin/barMax)
+					// so the bar reflects the same unit as the text above it -- e.g. 0dB
+					// sits at the visual center of a symmetric dB window, not near the
+					// left edge of the raw 0-4095 range. A non-finite barValue (Audio
+					// Gain's raw=0 is -Infinity dB) clamps to the bar's low end instead
+					// of falling through to progressBar()'s own "not finite" dashes.
+					let barVal = p.barValue ? p.barValue(n) : n
+					const barMin = p.barValue ? p.barMin : p.min
+					const barMax = p.barValue ? p.barMax : p.max
+					if (p.barValue && !Number.isFinite(barVal)) barVal = barMin
+					const bar = progressBar(barVal, barMin, barMax)
+					return { text: `${p.name}\\n${text}\\n${bar}`, size: 'auto' }
 				},
 			},
 			wb_measure_display: {
@@ -759,6 +964,35 @@ class DctViscaInstance extends InstanceBase {
 				callback: () => {
 					const full = this.state.dct_sdi_range === 'Full'
 					return { text: `SDI\\n${full ? 'FULL' : 'LEGAL'}`, size: 'auto', bgcolor: full ? LIGHT_BLUE : BLUE, color: WHITE }
+				},
+			},
+			dct_tally_display: {
+				type: 'advanced',
+				name: 'Tally cycle (display)',
+				options: [],
+				callback: () => {
+					const { red, green } = this.tally
+					const label = red && green ? 'YELLOW' : red ? 'RED' : green ? 'GREEN' : 'OFF'
+					const bgcolor = red && green ? ORANGE : red ? RED : green ? GREEN : DARK_GRAY
+					return { text: `Tally\\n${label}`, size: 'auto', bgcolor, color: WHITE }
+				},
+			},
+			cam_ae_display: {
+				type: 'advanced',
+				name: 'AE toggle (display)',
+				options: [],
+				callback: () => {
+					const auto = this.state.ae_mode !== 'Manual'
+					return { text: `AE\\n${auto ? 'AUTO' : 'MANUAL'}`, size: 'auto', bgcolor: auto ? GREEN : DIM_RED, color: WHITE }
+				},
+			},
+			cam_wb_display: {
+				type: 'advanced',
+				name: 'WB toggle (display)',
+				options: [],
+				callback: () => {
+					const auto = this.state.wb_mode !== 'Manual'
+					return { text: `WB\\n${auto ? 'AUTO' : 'MANUAL'}`, size: 'auto', bgcolor: auto ? GREEN : DIM_RED, color: WHITE }
 				},
 			},
 			dct_timecode_hold_display: {
@@ -824,7 +1058,8 @@ class DctViscaInstance extends InstanceBase {
 	// it stays exhaustive -- every inquiry except the ones that can never
 	// succeed at all (NO_POLL_INQUIRY_IDS), regardless of the `once` tier.
 	pollOnce() {
-		this.pollBatch(Object.entries(INQUIRIES).filter(([id]) => !NO_POLL_INQUIRY_IDS.has(id)).map(([, q]) => q))
+		const gatedIds = MODEL_GATED_IDS[this.cameraModel] ?? []
+		this.pollBatch(Object.entries(INQUIRIES).filter(([id]) => !NO_POLL_INQUIRY_IDS.has(id) && !gatedIds.includes(id)).map(([, q]) => q))
 	}
 
 	// The recurring background cycle (startPolling()'s setInterval). Skips
@@ -833,15 +1068,23 @@ class DctViscaInstance extends InstanceBase {
 	// a live session) -- only the "live" tier needs repeated polling, which
 	// keeps every cycle shorter than a full pollOnce() would be.
 	pollLiveOnce() {
-		this.pollBatch(Object.entries(INQUIRIES).filter(([id, q]) => !NO_POLL_INQUIRY_IDS.has(id) && !q.once).map(([, q]) => q))
+		const gatedIds = MODEL_GATED_IDS[this.cameraModel] ?? []
+		this.pollBatch(Object.entries(INQUIRIES).filter(([id, q]) => !NO_POLL_INQUIRY_IDS.has(id) && !q.once && !gatedIds.includes(id)).map(([, q]) => q))
 	}
 
 	// Fired once per successful (re)connection (see initSerial()/initTCP())
 	// and by the "System: Poll startup values now" action -- refreshes just
 	// the `once`-tagged tier pollLiveOnce() otherwise never touches, in case
 	// it changed while disconnected (another controller, a reboot, etc.).
+	// Note: on the very first connect, this.cameraModel is still unknown
+	// (gatedIds is []), so this batch includes `version` itself (needed to
+	// learn the model at all) plus every once-tagged id, gated or not -- a
+	// harmless one-time query for whichever ids turn out to be gated. Later
+	// calls (reconnect, or the manual "Poll startup values now" action) skip
+	// them correctly once the model is known.
 	pollStartupOnce() {
-		this.pollBatch(Object.values(INQUIRIES).filter((q) => q.once))
+		const gatedIds = MODEL_GATED_IDS[this.cameraModel] ?? []
+		this.pollBatch(Object.values(INQUIRIES).filter((q) => q.once && !gatedIds.includes(q.varId)))
 	}
 
 	// --- lifecycle ---------------------------------------------------------
@@ -853,7 +1096,16 @@ class DctViscaInstance extends InstanceBase {
 		// field's in-progress edit, only `isVisible` gets the live values).
 		const filterAdapters = this.config?.serialFilterAdapters !== false
 		const filteredPorts = (this.availableSerialPorts ?? []).filter((p) => !filterAdapters || this.isSerialAdapterPort(p))
-		const serialPortChoices = filteredPorts.length ? filteredPorts.map((p) => p.path) : [this.config?.serialPort ?? 'COM3']
+		// The one-and-only fallback for "nothing was scanned" needs to actually
+		// look like a path on THIS platform -- otherwise a connection created
+		// (or last saved) on Windows shows a stray "COM3" as if it were a live
+		// port on a Linux box that's never had a COM3 in its life, and vice
+		// versa for a Linux path leaking into a Windows config.
+		const isPlausiblePortPath = (path) => (process.platform === 'win32' ? /^COM\d+$/i.test(path) : path.startsWith('/dev/'))
+		const platformDefaultPort = process.platform === 'win32' ? 'COM3' : '/dev/ttyUSB0'
+		const savedPort = this.config?.serialPort
+		const fallbackPort = savedPort && isPlausiblePortPath(savedPort) ? savedPort : platformDefaultPort
+		const serialPortChoices = filteredPorts.length ? filteredPorts.map((p) => p.path) : [fallbackPort]
 		return [
 			{ type: 'static-text', id: 'info', width: 12, label: 'DCT VISCA', value: 'Raw VISCA over TCP or serial (RS-485/RS-232). For serial, run Companion on the machine wired to the camera.' },
 			{ type: 'dropdown', id: 'conn', label: 'Connection', width: 4, default: 'tcp', choices: [{ id: 'tcp', label: 'TCP' }, { id: 'serial', label: 'Serial (COM)' }] },
@@ -879,7 +1131,7 @@ class DctViscaInstance extends InstanceBase {
 			},
 			{ type: 'dropdown', id: 'baud', label: 'Baudrate', width: 3, default: 115200, choices: [{ id: 115200, label: '115200' }, { id: 57600, label: '57600' }], isVisible: (c) => c.conn === 'serial' },
 			{ type: 'number', id: 'address', label: 'Camera address (1-7)', width: 2, default: 1, min: 1, max: 7 },
-			{ type: 'number', id: 'pollInterval', label: 'Poll ms (0=off)', width: 2, default: 0, min: 0, max: 60000 },
+			{ type: 'number', id: 'pollInterval', label: 'Poll ms (0=off, min 2000)', width: 2, default: 0, min: 0, max: 60000 },
 			{ type: 'number', id: 'knobStep', label: 'Knob step (1-255 params)', width: 3, default: 4, min: 1, max: 128 },
 		]
 	}
@@ -897,6 +1149,16 @@ class DctViscaInstance extends InstanceBase {
 		if (!(Number.isFinite(Number(config.knobStep)) && Number(config.knobStep) > 0)) {
 			this.log('warn', `Knob step must be greater than 0 -- resetting "${config.knobStep}" to 4`)
 			config = { ...config, knobStep: 4 }
+			this.saveConfig(config)
+		}
+		// Same "field min is a visual hint only" story as Knob step above: 0
+		// (off) is still valid, but any nonzero interval faster than 2000ms
+		// gets corrected up to the floor and pushed back so the editor doesn't
+		// silently disagree with what's actually polling.
+		const pollMs = Number(config.pollInterval)
+		if (pollMs !== 0 && (!Number.isFinite(pollMs) || pollMs < 2000)) {
+			this.log('warn', `Poll ms must be 0 (off) or at least 2000 -- resetting "${config.pollInterval}" to 2000`)
+			config = { ...config, pollInterval: 2000 }
 			this.saveConfig(config)
 		}
 		this.config = config

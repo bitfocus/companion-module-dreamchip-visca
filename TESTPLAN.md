@@ -26,7 +26,7 @@ Reset is still always run once at the very end regardless, as the cleanup
 step described above. It is not part of `npm test`, and requires a camera
 attached.
 
-Companion's own background polling (`main.js`) is two-tier: 36 of the 54
+Companion's own background polling (`main.js`) is two-tier: 35 of the 54
 inquiries are calibration/setup-style values (`INQUIRIES.*.once: true` in
 `commands.js`) that are only ever queried once per connection
 (`pollStartupOnce()`) or on demand ("System: Poll startup values now"), not
@@ -57,15 +57,16 @@ necessarily via the recurring poll.
 | Flare Blue | flare <raw=<value>>  // sets flare's positional arg 3 (blue), real range 0-65535, via read-modify-write of all 3 args; raw is 0-4095, firmware multiplies it by 16 | [ Y] | |
 | AWB Speed | awb_speed <raw=<value>>  // real range is 0-2; do_awb_speed hard-rejects raw values above 2 with -EINVAL (unlike filter_detail, which clamps instead of erroring) | [ Y] | |
 | S-Log3 Master Gain | slog3_master_gain <raw=<value>>  // real range is signed -6..12 dB (system_settings.h); do_slog3_master_gain hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ Y] | |
-| Color Space | color_space <raw=<value>>  // real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP | [ Y] | |
+| Color Space | color_space <raw=<value>>  // real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP | [ Y] | reported failing on real hardware (raw=0 -> 90 61 41 ff); VISCA mapping itself confirmed correct against firmware source -- cause undetermined (CONFIG_CMD_COLOR_SPACE_AVAILABLE compiled out, or a runtime ISP/vout register-write failure); see investigation notes|
+| Color Space Preset: Rec.709 | color_space 0 (same wire command as Color Space (direct) above) | [ ] | |
+| Color Space Preset: Rec.2020 | color_space 1 | [ ] | |
+| Color Space Preset: S-Gamut3.Cine | color_space 2 | [ ] | |
 | PQ Max Brightness | pq_max_brightness <raw=<value>>  // real range is 100-10000 cd/m2 (do_pq_max_brightness); raw is 0-4095, linearly scaled, not a placeholder | [ Y] | |
 | MCC Op-Mode | mcc_opmode <value> | [ Y] | |
 | CNR Auto: Off | cnr_auto 0 | [ Y] | |
 | CNR Auto: On | cnr_auto 1 | [ Y] | dont see a change|
 | CNR Mode | cnr_mode <value> | [ Y] | |
-| DPF Enable: Off | dpf_enable 0 | [ N] | |
-| DPF Enable: On | dpf_enable 1 | [ N] | |
-| DPF Strength | dpf_strength <value> | [ N] | |
+| DPF Strength | dpf_strength <value>  // "DPF Enable" removed from Companion: dpf_enable/dpf_strength were both deleted from firmware in favor of a single dpf_denoise 0-7 knob (0=off); the VISCA mapping for function 0x13 was fixed to follow the rename, but the Companion command is still named/wired as dpf_strength pending that rename here too | [ N] | |
 | Filter Enable: Off | filter_enable 0 | [ Y] | |
 | Filter Enable: On | filter_enable 1 | [ Y] | |
 | Filter Detail | filter_detail <raw=<value>>  // real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring | [ Y] | |
@@ -110,14 +111,15 @@ necessarily via the recurring poll.
 | AE: Auto | aec 1 | [ Y] | |
 | AE: Manual | aec 0 | [ Y] | |
 | AE: Shutter Pri | aec 1 | [ Y] | |
+| AE: Toggle Auto/Manual | aec 1 or 0 (Companion-only toggle, see main.js) | [ ] | |
 | Gain: reset | cam_gain 1000 | [ Y] | |
 | Gain: up | read-modify-write (+109) | [ Y] | |
 | Gain: down | read-modify-write (-109) | [ Y] | |
-| Gain (direct) | cam_gain <raw=<value>>  // real range is 1000-45715 (1x/0dB/140 ISO min; max from the current AUTO gain-mode range); raw is 0-4095, linearly scaled, not a placeholder; knob is log-scaled (5%/turn, 4-raw-unit minimum step), see main.js adjustParam() | [ Y] | |
+| Gain (direct) | cam_gain <raw=<value>>  // real range is 1000-45715 (1x/0dB/140 ISO min; max from the current AUTO gain-mode range); raw is 0-4095, linearly scaled, not a placeholder; knob is log-scaled (5%/turn, 4-raw-unit minimum step), see main.js adjustParam(); knob LCD displays ISO (gainRawToIso(), commands.js), not the raw number | [ Y] | |
 | Shutter: reset | cam_exposure 1000 | [ Y] | |
 | Shutter: up | read-modify-write (+93us) | [ Y] | |
 | Shutter: down | read-modify-write (-93us) | [ Y] | |
-| Shutter (direct) | cam_exposure <raw=<value>>  // real range is 100-38339us (observed on real hardware); raw is 0-4095, linearly scaled, not a placeholder | [ Y] | |
+| Shutter (direct) | cam_exposure <raw=<value>>  // real range is 100-38339us (observed on real hardware); raw is 0-4095, linearly scaled, not a placeholder; knob is now log-scaled (5%/turn, 4-raw-unit minimum step) and floored so the fastest selectable manual shutter is >=200us (was 100us); knob LCD displays microseconds (shutterRawToUs(), commands.js) | [ ] | needs re-verification: min floor + logScale are new|
 | Flicker: Off | read-modify-write of aec (taf=10000, same as 50Hz -- taf cannot be disabled) | [ Y] | |
 | Flicker: 50Hz | read-modify-write of aec (taf=10000) | [ Y] | |
 | Flicker: 60Hz | read-modify-write of aec (taf=8333) | [ Y] | |
@@ -137,22 +139,23 @@ necessarily via the recurring poll.
 | WB: Outdoor | wb_preset 2 | [ Y] | |
 | WB: Manual | awb 0 | [ Y] | |
 | WB: Trigger | wb | [ Y] | |
+| WB: Toggle Auto/Manual | awb 1 or 0 (Companion-only toggle, see main.js) | [ ] | |
 | Red Gain: reset | gain_red 512 | [ Y] | |
 | Red Gain: up | read-modify-write (+step) | [ Y] | |
 | Red Gain: down | read-modify-write (-step) | [ Y] | |
-| Red Gain (direct) | gain_red <value> | [ Y] | |
+| Red Gain (direct) | gain_red <value>; knob LCD displays a float factor value/256 (wbGainFactor(), commands.js), unity=256 | [ Y] | |
 | Blue Gain: reset | gain_blue 512 | [ Y] | |
 | Blue Gain: up | read-modify-write (+step) | [ Y] | |
 | Blue Gain: down | read-modify-write (-step) | [ Y] | |
-| Blue Gain (direct) | gain_blue <value> | [ Y] | |
-| Color Gain (direct) | post_sat <value> | [ Y] | |
-| Color Hue (direct) | post_hue <value> | [ Y] | |
-| Color Temp (direct) | wb_preset <value> | [ Y] | query: cannot parse return string|
-| Color Temp (Kelvin) | wb_temp <value>  // UI range hardcoded 2200-10000; firmware rejects out-of-range per live per-sensor min/max | [ ] | |
+| Blue Gain (direct) | gain_blue <value>; knob LCD displays a float factor value/256 (wbGainFactor()), unity=256 | [ Y] | |
+| Color Gain (direct) | post_sat <value>; knob LCD displays a float factor value/128 (saturationFactor(), commands.js) -- different unity than the WB channel gains above, despite the similar name | [ Y] | |
+| Color Hue (direct) | post_hue <value>; knob LCD displays degrees (hueRawToDeg(): raw*90/128), see commands.js | [ Y] | |
+| Color Temp Preset (direct) | wb_preset <value>  // renamed from "Color Temp (direct)" to disambiguate from the settable Kelvin entry below, which now owns the bare "Color Temp" name | [ Y] | query: cannot parse return string|
+| Color Temp (Kelvin) | wb_temp <value>  // UI range hardcoded 2200-10000; firmware rejects out-of-range per live per-sensor min/max; knob LCD displays "<value> K"; COMMANDS/action name is now just "Color Temp" (Kelvin unit shown via the knob's format() instead) | [ ] | |
 | Green Gain: Reset | gain_green 256 | [ Y] | |
 | Green Gain: Up | read-modify-write (+step) | [ Y] | |
 | Green Gain: Down | read-modify-write (-step) | [ Y] | |
-| Green Gain (direct) | gain_green <value> | [ Y] | |
+| Green Gain (direct) | gain_green <value>; knob LCD displays a float factor value/256 (wbGainFactor()), unity=256 | [ Y] | |
 | WB Kelvin Measure | wb_temp_measure | [ ] | |
 
 ### Audio
@@ -162,7 +165,7 @@ necessarily via the recurring poll.
 | Audio Enable: Off | audio_enable 0 | [ Y] | |
 | Audio Enable: On | audio_enable 1 | [ Y] | |
 | Audio: Toggle On/Off | audio_enable 0 or 1 (Companion-only toggle, see main.js) | [ ] | |
-| Audio Gain | audio_gain <raw=<value>>  // real range is 0-65535 (4.12 fixed-point, 4096 = 1.0x unity gain); raw is 0-4095, firmware multiplies it by 16; knob is log-scaled (5%/turn), see main.js adjustParam() | [ Y] | |
+| Audio Gain | audio_gain <raw=<value>>  // real range is 0-65535 (4.12 fixed-point, 4096 = 1.0x unity gain); raw is 0-4095, firmware multiplies it by 16; knob is log-scaled, now stepped in exact 0.5dB increments (was a generic 5%/turn), see main.js adjustParam(); knob LCD displays dB (audioGainRawToDb(), commands.js), 0 to ~24.08dB (the hardware's real ceiling) | [ ] | needs re-verification: stepPercent + display are new|
 
 ## Inquiries (Read-back)
 
@@ -201,8 +204,7 @@ necessarily via the recurring poll.
 | S-Log3 Master Gain | real range is signed -6..12 dB (system_settings.h); do_slog3_master_gain hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ ] | |
 | CNR Mode | cnr_mode | [ ] | |
 | CNR Auto | cnr_auto | [ ] | |
-| DPF Enable | dpf_enable | [ ] | |
-| DPF Strength | dpf_strength | [ ] | |
+| DPF Strength | dpf_strength  // removed from firmware (see Companion Actions section above); this inquiry is kept in Companion but will always error until renamed to dpf_denoise | [ ] | |
 | Filter Enable | filter_enable | [ ] | |
 | Filter Detail | real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring | [ ] | |
 | Filter Denoise | filter_denoise | [ ] | |
