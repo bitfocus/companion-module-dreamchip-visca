@@ -8,7 +8,7 @@
 //   direct - <prefix> + value split into <nibbles> low-nibble bytes
 //   fixed  - no-argument payload
 //   video  - cam_system video mode via the SYSTEM table
-//   iso    - cam_gain via the curated GAIN_ISO named-step table (OG03A10)
+//   iso    - cam_gain via the curated GAIN_ISO named-step table
 //   shutter - cam_exposure via the curated SHUTTER_SPEEDS named-step table
 // INQUIRIES entries carry a payload + a decode descriptor (enum|value|version|system).
 
@@ -24,7 +24,7 @@ export const ENUM = {
 	// Dream Chip extension reply maps (raw camera value -> label)
 	dct_onoff: { 0x00: 'Off', 0x01: 'On' },
 	dct_gain_mode: { 0x00: 'Auto', 0x01: 'LCG', 0x02: 'HCG' },
-	// do_sdi_range's own help text: "<flag> - set sdi range [0: legal, 1: full range]"
+	// SDI Range: 0 = legal range, 1 = full range.
 	dct_sdi_range: { 0x00: 'Legal', 0x01: 'Full' },
 	dct_timecode_hold: { 0x00: 'Run', 0x01: 'Hold' },
 }
@@ -40,8 +40,8 @@ export const SYSTEM = {
 	11: [0x00, 0x00],
 	12: [0x00, 0x01],
 }
-// video_mode index -> human label (real ProVideo video_mode_t names,
-// interfaces/include/video_modes.h). Keyed identically to SYSTEM.
+// video_mode index -> human label (the camera's canonical video-mode names).
+// Keyed identically to SYSTEM.
 export const SYSTEM_NAMES = {
 	4: '1080p30',
 	5: '1080p25',
@@ -55,27 +55,26 @@ export const SYSTEM_NAMES = {
 const SYSTEM_INQ = {}
 for (const [vm, [b2, b3]] of Object.entries(SYSTEM)) SYSTEM_INQ[`${b2},${b3}`] = Number(vm)
 
-// --- Gain (ISO) named-step table (OmniVision OG03A10 sensor ONLY) ----------
-// cam_gain's wire value is a raw 3-nibble 0-4095 that the firmware linearly
-// scales onto a "real gain unit" range 1000-45715 via truncating integer
-// division (real = 1000 + raw*44715/4095; dct-phoenix-zephyr-bsp
-// visca/src/visca_map_exposure.c map_gain()/unmap_gain()). The OG03A10 sensor
-// (driver/src/omnivision.c) defines ISO in real-gain units as
-// real_gain_unit(ISO) = floor(ISO*1000/MIN_ISO), MIN_ISO = 140 (the 1x/0dB
-// floor; system_settings.c and og03a10_dpf_tables.h independently confirm the
-// 140-ISO-per-1000-gain-unit proportionality). Inverting map_gain() with the
-// SAME truncating integer division gives the raw wire value for an ISO:
+// --- Gain (ISO) named-step table (currently fitted sensor ONLY) ------------
+// cam_gain's wire value is a raw 3-nibble 0-4095 that the camera firmware
+// linearly scales onto a "real gain unit" range 1000-45715 via truncating
+// integer division (real = 1000 + raw*44715/4095). The current sensor
+// defines ISO in real-gain units as real_gain_unit(ISO) =
+// floor(ISO*1000/140), with 140 ISO as the 1x/0dB floor (the
+// 140-ISO-per-1000-gain-unit proportionality is confirmed by multiple
+// independent sources). Inverting the scaling with the SAME truncating
+// integer division gives the raw wire value for an ISO:
 //   raw(ISO) = trunc((floor(ISO*1000/140) - 1000) * 4095 / 44715), clamped 0-4095
 // NOTE (trunc, not round): the firmware's inverse is C integer division
 // (truncation); Math.round would give different raw values for ~half the
 // steps (e.g. ISO 6400 -> 4095 instead of the correct 4094).
 //
-// CAVEAT: the 140 / 1000-45715 constants are SPECIFIC TO THE OG03A10 (the
-// Phoenix board's sensor). Other sensor variants (IMX274, IMX421) use
-// different constants, and VISCA cannot detect which sensor is fitted. This
-// is deliberately hardcoded for the OG03A10 per project decision -- do NOT
-// try to make it sensor-agnostic.
-export const GAIN_ISO_MIN = 140 // OG03A10 MIN_ISO
+// CAVEAT: the 140 / 1000-45715 constants are SPECIFIC TO THE CURRENTLY
+// FITTED SENSOR. Other sensor variants (IMX274, IMX421) use different
+// constants, and VISCA cannot detect which sensor is fitted. This is
+// deliberately hardcoded for the currently fitted sensor per project
+// decision -- do NOT try to make it sensor-agnostic.
+export const GAIN_ISO_MIN = 140 // base (1x/0dB) ISO of the fitted sensor
 const GAIN_REAL_MIN = 1000
 const GAIN_REAL_MAX = 45715
 const GAIN_RAW_MAX = 4095
@@ -90,7 +89,7 @@ export function isoToGainRaw(iso) {
 // drift from the formula.
 export const GAIN_ISO_STEPS = [140, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400]
 export const GAIN_ISO = GAIN_ISO_STEPS.map((iso) => ({ iso, raw: isoToGainRaw(iso) }))
-// Inverse of isoToGainRaw()'s underlying map_gain() -- for DISPLAYING the
+// Inverse of isoToGainRaw()'s underlying scaling -- for DISPLAYING the
 // Gain (direct) knob's current raw value as an ISO number (the knob still
 // steps in raw units; only the shown text changes). We're going raw -> real
 // -> ISO here, not back through the firmware's own truncating raw(ISO)
@@ -103,11 +102,10 @@ export function gainRawToIso(raw) {
 }
 
 // --- Shutter (Speed) named-step table ---------------------------------------
-// cam_exposure's wire value is a raw 3-nibble 0-4095 that the firmware
-// linearly scales onto a real microsecond range 100-38339us via truncating
-// integer division (real = 100 + raw*38239/4095; dct-phoenix-zephyr-bsp
-// visca/src/visca_map_exposure.c map_exposure()/unmap_exposure() --
-// CAM_EXPOSURE_MIN/MAX/SPAN/RAW_MAX). Shutter speed is expressed to the user
+// cam_exposure's wire value is a raw 3-nibble 0-4095 that the camera
+// firmware linearly scales onto a real microsecond range 100-38339us via
+// truncating integer division (real = 100 + raw*38239/4095). Shutter speed
+// is expressed to the user
 // as a photographic "1/n second" fraction; converting n -> microseconds
 // (round(1e6/n)) is a plain unit conversion, not a firmware constant, so it
 // uses ordinary rounding to the nearest microsecond. Converting that real
@@ -131,7 +129,7 @@ export const SHUTTER_SPEEDS = SHUTTER_SPEED_STEPS.map((n) => {
 	const us = Math.round(1e6 / n)
 	return { n, us, raw: shutterUsToRaw(us) }
 })
-// Inverse of shutterUsToRaw()'s underlying map_exposure() -- for DISPLAYING
+// Inverse of shutterUsToRaw()'s underlying scaling -- for DISPLAYING
 // the Shutter (direct) knob's current raw value in microseconds.
 export function shutterRawToUs(raw) {
 	return SHUTTER_REAL_MIN + Math.trunc((raw * (SHUTTER_REAL_MAX - SHUTTER_REAL_MIN)) / SHUTTER_RAW_MAX)
@@ -160,7 +158,7 @@ export function audioGainRawToDb(raw) {
 // raw=0) just clamp to the bar's left edge.
 export const AUDIO_GAIN_BAR_MAX = 24.08
 export const AUDIO_GAIN_BAR_MIN = -AUDIO_GAIN_BAR_MAX
-// post_hue's raw wire value is 128/90 counts per degree (see cam_color_hue_direct);
+// Color Hue's raw wire value is 128/90 counts per degree (see cam_color_hue_direct);
 // inverse: degrees = raw * 90/128.
 export function hueRawToDeg(raw) {
 	return ((raw * 90) / 128).toFixed(1)
@@ -169,7 +167,7 @@ export function hueRawToDeg(raw) {
 export function wbGainFactor(raw) {
 	return (raw / 256).toFixed(2)
 }
-// Color Gain (post_sat/saturation) unity = 128 raw (a different unit than the
+// Color Gain (saturation) unity = 128 raw (a different unit than the
 // WB channel gains above, despite the similar "gain" name).
 export function saturationFactor(raw) {
 	return (raw / 128).toFixed(2)
@@ -187,7 +185,7 @@ export function decodeNibbles(bytes) {
 	return v
 }
 // Reinterpret an unsigned nibble-decoded value as two's-complement signed
-// (e.g. post_hue's -128..127 is wire-encoded as an unsigned byte via the same
+// (e.g. Color Hue's -128..127 is wire-encoded as an unsigned byte via the same
 // 2-nibble encoding as any other value, then reinterpreted on decode).
 export function toSigned(raw, nibbles) {
 	const half = 1 << (4 * nibbles - 1)
@@ -207,8 +205,8 @@ export function decodeReply(decode, payload) {
 		case 'value': {
 			const raw = decodeNibbles(payload)
 			// `decode.nibbles`, not `payload.length`: some real inquiry replies
-			// (e.g. post_hue/post_bright, via reply_pq in visca_map_picture.c)
-			// always pad to a fixed "00 00 0p 0q" 4-byte shape even though the
+			// (e.g. the signed Color Hue/Bright replies) always pad to a fixed
+			// "00 00 0p 0q" 4-byte shape even though the
 			// real value is only 2 nibbles wide -- using the padded byte count
 			// as the two's-complement bit-width would misread negative values
 			// as large positive ones.
@@ -234,28 +232,27 @@ export function decodeReply(decode, payload) {
 	}
 }
 
-// tm_mode's 5 named states (TM_MODE_OFF..TM_MODE_2_0_EV, isp_drv.h), index ==
+// Tone Mapping Mode's 5 named states, index ==
 // wire value == raw wire nibble. Single source of truth for both
 // dct_tm_mode's knob display and dct_tm_mode_preset's per-choice buttons, so
 // the labels/choices/values can never drift apart.
 const TM_MODE_LABELS = ['Off', '+0.5EV', '+1.0EV', '+1.5EV', '+2.0EV']
 
-// color_space's 3 named states (COLOR_SPACE_REC709/REC2020/S_GAMUT3_CINE,
-// isp_drv.h), index == wire value == raw wire nibble. Single source of truth
+// Color Space's 3 named states, index == wire value == raw wire nibble.
+// Single source of truth
 // for both dct_color_space's knob display and dct_color_space_preset's
 // per-choice buttons, so the labels/choices/values can never drift apart.
 const COLOR_SPACE_LABELS = ['Rec.709', 'Rec.2020', 'SGam3.Cine']
 
-// black_red/green/blue's real factory default is NOT 0 -- it's a per-ISP
-// calibration constant (ISP_BLACK_RED/GREEN/BLUE_DEFAULT): 256 on the
-// ProVideo ISP (Violetta, isp_drv_provideo.h), 16 on the Phoenix ISP
-// (Marietta, isp_drv_phoenix.h). Unlike Contrast's raw-128 (a fixed point
+// Black R/G/B's real factory default is NOT 0 -- it's a per-model
+// factory calibration constant: 256 on Atom Two, 16 on Atom Two HDR.
+// Unlike Contrast's raw-128 (a fixed point
 // baked into the wire encoding itself), this default varies by connected
 // camera, so dct_black_red/green/blue's format needs to know the model
 // (passed as its 2nd arg by the knob_value feedback, main.js) to show a
 // "0 at factory default" delta. Model unknown (no version reply yet) shows
 // the real value with no delta rather than guessing a default.
-const BLACK_DEFAULT_BY_MODEL = { violetta: 256, marietta: 16 }
+const BLACK_DEFAULT_BY_MODEL = { 'atom-two': 256, 'atom-two-hdr': 16 }
 function formatBlackDelta(raw, model) {
 	const real = raw * 2
 	const def = BLACK_DEFAULT_BY_MODEL[model]
@@ -283,28 +280,32 @@ export const COMMANDS = {
 	// Reset/Up/Down is the standard VISCA CAM_Gain structure. Up/Down are a
 	// firmware-side read-modify-write of cam_gain's real value (query current
 	// value, step by ~109 gain units -- the same "10 raw nibble-steps' worth"
-	// density as gain_red/blue/green's step -- clamp to 1000-45715, resend).
+	// density as the Red/Blue/Green Gain controls' step -- clamp to
+	// 1000-45715, resend).
 	cam_gain: { name: 'Gain', group: 'Exposure', kind: 'rud', func: 0x0c },
-	// cam_gain's real range is 1000-45715 (1x/0dB/140 ISO min; max from the
-	// current AUTO gain-mode range, isi_access_get_gain_range); widened to 3
-	// nibbles (0-4095) for ~10.9 gain units per step, matching the BSP.
+	// cam_gain's real range is 1000-45715 (1x/0dB/140 ISO min; max is the
+	// top of the camera's gain range); widened to 3
+	// nibbles (0-4095) for ~10.9 gain units per step, matching the camera
+	// firmware.
 	// logScale, same reasoning as dct_audio_gain: gain is perceived/graded in
 	// stops/dB (logarithmic), not linear raw units -- trying it here too.
 	// `step` is irrelevant under logScale (adjustParam() only uses its sign),
 	// so it's dropped in favor of stepPercent.
 	cam_gain_direct: { name: 'Gain (direct)', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00), nibbles: 3, logScale: true, stepPercent: 5, minStep: 4, format: (raw) => `ISO ${gainRawToIso(raw)}` },
-	// Gain (ISO): a curated dropdown of named third-stop ISO values (OG03A10
-	// sensor) that map to the SAME wire command as cam_gain_direct (01 04 4C
+	// Gain (ISO): a curated dropdown of named third-stop ISO values that map
+	// to the SAME wire command as cam_gain_direct (01 04 4C
 	// ...) via the GAIN_ISO table above. Purely additive -- the raw
 	// cam_gain_direct number control is left untouched for manual/precise entry.
 	cam_gain_iso: { name: 'Gain', group: 'Exposure', kind: 'iso', prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00), nibbles: 3 },
 	// Reset/Up/Down is the standard VISCA CAM_Shutter structure. Up/Down are a
 	// firmware-side read-modify-write of cam_exposure's real value (query
 	// current value, step by ~93us -- the same "10 raw nibble-steps' worth"
-	// density as gain_red/blue/green's step -- clamp to 100-38339us, resend).
+	// density as the Red/Blue/Green Gain controls' step -- clamp to
+	// 100-38339us, resend).
 	cam_shutter: { name: 'Shutter', group: 'Exposure', kind: 'rud', func: 0x0a },
 	// cam_exposure's real range is 100-38339us (observed on real hardware);
-	// widened to 3 nibbles (0-4095) for ~9.3us per step, matching the BSP.
+	// widened to 3 nibbles (0-4095) for ~9.3us per step, matching the camera
+	// firmware.
 	// logScale (like Gain above): shutter speed is perceived/graded in stops,
 	// not linear microseconds. `min` floors the fastest selectable manual
 	// shutter at 200us (project decision), computed from shutterUsToRaw() so
@@ -329,8 +330,8 @@ export const COMMANDS = {
 
 	// White balance
 	// The standard VISCA set also defines a "One Push" WB mode (0x35/0x03),
-	// but it lands on the exact same real command as Manual (both send
-	// "awb 0" -- selecting either just disables continuous auto-WB, it
+	// but it lands on the exact same camera-side action as Manual (selecting
+	// either just disables continuous auto-WB, it
 	// doesn't calculate anything by itself; see Trigger below for the command
 	// that actually runs the one-push calculation), so it's not exposed as a
 	// separate choice here.
@@ -342,42 +343,43 @@ export const COMMANDS = {
 		},
 	},
 	cam_rgain: { name: 'Red Gain', group: 'White Balance', kind: 'rud', func: 0x03 },
-	// gain_red's real range is 0-4095 (ISP_AWB_GAIN_MAX); widened to 3 nibbles
-	// so the wire encoding represents it exactly, matching the BSP fix.
+	// Red WB gain's real range is 0-4095 (the camera's AWB-gain maximum);
+	// widened to 3 nibbles
+	// so the wire encoding represents it exactly.
 	cam_rgain_direct: { name: 'Red Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x43, 0x00, 0x00), nibbles: 3, format: (raw) => `${wbGainFactor(raw)}x` },
 	cam_bgain: { name: 'Blue Gain', group: 'White Balance', kind: 'rud', func: 0x04 },
-	// gain_blue's real range is 0-4095 (ISP_AWB_GAIN_MAX); widened to 3 nibbles.
+	// Blue WB gain's real range is 0-4095; widened to 3 nibbles.
 	cam_bgain_direct: { name: 'Blue Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x44, 0x00, 0x00), nibbles: 3, format: (raw) => `${wbGainFactor(raw)}x` },
-	// post_sat's real range is 0-255 (ISP_CCOR12_SATURATION_MAX in the BSP); the
-	// VISCA wire format is widened to 2 nibbles to match, in step with the same
-	// fix in visca_map_picture.c.
+	// Color saturation's real range is 0-255; the
+	// VISCA wire format is widened to 2 nibbles to match.
 	cam_color_gain_direct: { name: 'Color Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x49, 0x00, 0x00), nibbles: 2, format: (raw) => `${saturationFactor(raw)}x` },
-	// post_hue's real range is signed -128..127 (ISP_CCOR12_HUE_MIN/MAX); wire
+	// Color hue's real range is signed -128..127; wire
 	// format widened from 1 nibble (unsigned 0-15, couldn't go negative at all).
 	cam_color_hue_direct: { name: 'Color Hue (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x4f, 0x00, 0x00), nibbles: 2, signed: true, format: (raw) => `${hueRawToDeg(raw)}°` },
-	// wb_preset's calibration-profile presets each have a real Kelvin rating,
-	// but there's no way to query which preset is currently active -- so this
+	// The camera's calibration-profile presets each have a real Kelvin
+	// rating, but there's no way to query which preset is currently active --
+	// so this
 	// is a raw preset-index passthrough with no Kelvin matching
-	// (apply_color_profile's own -EINVAL bounds check handles an out-of-range
+	// (the camera's own bounds check rejects an out-of-range
 	// index) and has no inquiry counterpart of its own. `max` narrows the
 	// Companion-side UI/knob range to 0-9 -- the largest calibration profile
 	// has 10 presets (indices 0-9); profile 0 only has 7 (0-6), so indices
 	// 7-9 still correctly error there (confirmed on real hardware), but 0-9
 	// is the real usable range across profiles, not the wire's full 0-4095.
 	// Distinct from dct_wb_temp below, which DOES set a real settable Kelvin
-	// value (via the wb_temp ProVideo command).
+	// value.
 	color_temp_direct: { name: 'Color Temp Preset (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x04, 0x20, 0x00, 0x00), nibbles: 2, min: 0, max: 9 },
-	// wb_temp sets the whitepoint by target Kelvin (do_wb_temp ->
-	// apply_color_temperature). The true min/max are queried live per-sensor
-	// (get_color_temperature_range), but the UI range is hardcoded to the
-	// real-world 2200-10000 K by project decision; apply_color_temperature's
-	// own -EINVAL bounds check remains the source of truth (a too-narrow or
+	// dct_wb_temp sets the whitepoint by target Kelvin. The true min/max are
+	// queried live per-sensor, but the UI range is hardcoded to the
+	// real-world 2200-10000 K by project decision; the camera's own bounds
+	// check remains the source of truth (a too-narrow or
 	// slightly-off UI range is not unsafe). 4 nibbles carry the 16-bit Kelvin,
 	// no scaling (Kelvin already is the real unit). The current whitepoint
 	// reads back via INQUIRIES.dct_wb_temp (the knob's varId, derived by
 	// continuousParams as dct_wb_temp); min/max/measure are separate
 	// read-only inquiries (see below) sharing this same SS 0x0B via a
-	// selector byte, since bare "wb_temp" returns all three at once and no
+	// selector byte, since the camera returns all three values at once for
+	// the base command and no
 	// VISCA command in this module packs multiple values into one inquiry.
 	// step: 50 overrides the generic knob preset's default step (main.js's
 	// global `knobStep` config, meant for small/raw-range params) -- this
@@ -389,18 +391,17 @@ export const COMMANDS = {
 		name: 'Gamma', group: 'System', kind: 'enum',
 		choices: { 'BT.709': P(0x01, 0x04, 0x5b, 0x00), HLG: P(0x01, 0x04, 0x5b, 0x01), PQ: P(0x01, 0x04, 0x5b, 0x02), 'S-Log3': P(0x01, 0x04, 0x5b, 0x03) },
 	},
-	// post_bright's real range is signed -128..127 (ISP_CPROC_BRIGHTNESS_MIN/MAX
-	// or equivalently ISP_CCOR12_BRIGHTNESS_MIN/MAX); signed to match the fix
-	// in visca_map_picture.c. cam_bright's Direct form shares its RUD's
+	// Bright's real range is signed -128..127, signed to match the camera
+	// firmware. cam_bright's Direct form shares its RUD's
 	// function byte (0x0d) -- the firmware disambiguates by packet length,
-	// mirroring ggain_command's own dispatch style.
+	// mirroring the Green Gain command's own dispatch style.
 	// (The standard VISCA set also defines a 2nd, Direct-only "CAM_Brightness"
-	// function (0xA1) that lands on this exact same post_bright command --
+	// function (0xA1) that lands on this exact same camera-side control --
 	// the firmware still answers it for other controllers, but it's a pure
 	// duplicate of cam_bright_direct so it's deliberately not exposed here.)
 	cam_bright: { name: 'Bright', group: 'System', kind: 'rud', func: 0x0d },
 	cam_bright_direct: { name: 'Bright (direct)', group: 'System', kind: 'direct', prefix: P(0x01, 0x04, 0x0d, 0x00, 0x00), nibbles: 2, signed: true },
-	// post_cont's real factory default/neutral is 128 (0x80, "1.0x" -- see
+	// Contrast's real factory default/neutral is 128 (0x80, "1.0x" -- see
 	// KNOB_PRESS_SET_VALUE in main.js), not the wire's own 0. This is a
 	// display-only offset (raw - 128), NOT `signed: true` -- that flag is a
 	// two's-complement reinterpretation (raw 0 stays 0, negative wraps from
@@ -434,21 +435,21 @@ export const COMMANDS = {
 		name: 'Green Gain', group: 'White Balance', kind: 'enum',
 		choices: { Reset: P(0x01, 0x7e, 0x01, 0x01, 0x00), Up: P(0x01, 0x7e, 0x01, 0x01, 0x02), Down: P(0x01, 0x7e, 0x01, 0x01, 0x03) },
 	},
-	// gain_green's real range is 0-4095 (ISP_AWB_GAIN_MAX); widened to 3 nibbles.
+	// Green WB gain's real range is 0-4095; widened to 3 nibbles.
 	dct_ggain_direct: { name: 'Green Gain (direct)', group: 'White Balance', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x01, 0x00, 0x00), nibbles: 3, format: (raw) => `${wbGainFactor(raw)}x` },
 	dct_gain_mode: {
 		name: 'Gain Mode', group: 'Exposure', kind: 'enum',
 		choices: { Auto: P(0x01, 0x7e, 0x01, 0x02, 0x00), LCG: P(0x01, 0x7e, 0x01, 0x02, 0x01), HCG: P(0x01, 0x7e, 0x01, 0x02, 0x02) },
 	},
 
-	// black_master's real range is signed -2048..2047 (ISP_BMST_OFFSET_MIN/MAX,
-	// a signed 12-bit value); widened to 3 nibbles to represent it exactly.
+	// Black Master's real range is signed -2048..2047 (a signed 12-bit
+	// value); widened to 3 nibbles to represent it exactly.
 	dct_black_master: { name: 'Black Master', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x03), nibbles: 3, signed: true },
-	// black_red/green/blue's real range is signed -4096..4095 (ISP_BLS_MIN/MAX);
+	// Black R/G/B's real range is signed -4096..4095;
 	// kept at 3 nibbles (signed 12-bit, -2048..2047) with firmware scaling by 2
 	// to cover -4096..4094 -- odd values and 4095 itself are unreachable, an
 	// accepted precision tradeoff. `format` shows the delta from the real,
-	// per-ISP factory default (see formatBlackDelta/BLACK_DEFAULT_BY_MODEL
+	// per-model factory default (see formatBlackDelta/BLACK_DEFAULT_BY_MODEL
 	// above) instead of the raw wire value, display-only -- the knob's own
 	// stepping/encoding stays in wire units (same treatment as Contrast's
 	// raw-128 offset above: only the printed text changes).
@@ -465,29 +466,28 @@ export const COMMANDS = {
 		format: formatBlackDelta,
 	},
 
-	// Flare's real signature is "flare <red> <green> <blue>" -- positional,
-	// all 3 needed on every set (do_flare has no single-channel form).
-	// Firmware handles this via read-modify-write, same as the aec fields
+	// Flare is a positional 3-channel control (red/green/blue) --
+	// all 3 needed on every set (the camera has no single-channel form).
+	// Firmware handles this via read-modify-write, same as the AEC fields
 	// further down: it queries flare's current 3-value state, overrides just
 	// the one channel below, and reissues the full command. Real range per
-	// channel is 0-65535 (ISP_BLS_FLARE_MIN/MAX); raw is 0-4095, firmware
-	// multiplies it by 16 (same x16 scale as audio_gain).
+	// channel is 0-65535; raw is 0-4095, firmware
+	// multiplies it by 16 (same x16 scale as Audio Gain).
 	dct_flare_red: { name: 'Flare Red', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x07), nibbles: 3 },
 	dct_flare_green: { name: 'Flare Green', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1b), nibbles: 3 },
 	dct_flare_blue: { name: 'Flare Blue', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x1c), nibbles: 3 },
-	// awb_speed's real range is 0-2 (do_awb_speed hard-rejects >2 with
-	// -EINVAL); `max` narrows the Companion-side UI/knob range to what's
+	// AWB Speed's real range is 0-2 (the camera hard-rejects >2);
+	// `max` narrows the Companion-side UI/knob range to what's
 	// actually valid instead of the wire's full 1-nibble 0-15 capacity.
 	dct_awb_speed: { name: 'AWB Speed', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x08), nibbles: 1, min: 0, max: 2 },
-	// slog3_master_gain's real range is signed -6..12 dB (system_settings.h;
-	// do_slog3_master_gain hard-rejects outside that with -EINVAL). Signed to
-	// match the BSP's bespoke two's-complement handling (it's no longer a
-	// generic unsigned DCT_VALUE passthrough); `min`/`max` narrow the
+	// S-Log3 Master Gain's real range is signed -6..12 dB (hard-rejected
+	// outside that by the camera firmware). Signed to
+	// match the firmware's bespoke two's-complement handling (it's no longer a
+	// generic unsigned passthrough); `min`/`max` narrow the
 	// Companion-side UI/knob range from the wire's full signed -128..127.
 	dct_slog3_gain: { name: 'S-Log3 Master Gain', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x09), nibbles: 2, signed: true, min: -6, max: 12 },
-	// color_space's real range is 0-2 (COLOR_SPACE_REC709/REC2020/
-	// S_GAMUT3_CINE, isp_drv.h; do_color_space hard-rejects outside 0-2 with
-	// -EOPNOTSUPP); `max` narrows the Companion-side UI/knob range from the
+	// Color Space's real range is 0-2 (the camera hard-rejects outside 0-2);
+	// `max` narrows the Companion-side UI/knob range from the
 	// wire's full 1-nibble 0-15 capacity.
 	dct_color_space: {
 		name: 'Color Space', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x17), nibbles: 1, min: 0, max: 2,
@@ -501,11 +501,10 @@ export const COMMANDS = {
 		name: 'Color Space', group: 'System', kind: 'enum',
 		choices: Object.fromEntries(COLOR_SPACE_LABELS.map((label, v) => [label, P(0x01, 0x7e, 0x01, 0x17, v)])),
 	},
-	// tm_mode's real range is 0-4 (TM_MODE_OFF..TM_MODE_2_0_EV, isp_drv.h);
-	// do_tm_mode hard-rejects outside that with -EINVAL. The old "off path is
-	// a hack for NAB" caveat that kept this excluded no longer applies -- BSP
-	// commit 645f07e replaced the ad-hoc register poke with a real 5-entry
-	// tone-curve LUT (isp_phoenix.c) where mode 0 is a proper identity curve.
+	// Tone Mapping Mode's real range is 0-4 (the camera hard-rejects outside
+	// that). The old "off path is a firmware hack" caveat that kept this
+	// excluded no longer applies -- current firmware implements mode 0 as a
+	// proper identity tone curve.
 	dct_tm_mode: {
 		name: 'Tone Mapping Mode', group: 'System', kind: 'direct',
 		prefix: P(0x01, 0x7e, 0x01, 0x21), nibbles: 1, min: 0, max: 4,
@@ -519,8 +518,9 @@ export const COMMANDS = {
 		name: 'Tone Mapping Mode', group: 'System', kind: 'enum',
 		choices: Object.fromEntries(TM_MODE_LABELS.map((label, v) => [label, P(0x01, 0x7e, 0x01, 0x21, v)])),
 	},
-	// pq_max_brightness's real range is 100-10000 cd/m2 (do_pq_max_brightness);
-	// widened to 3 nibbles (0-4095) for ~2.4 cd/m2 per step, matching the BSP.
+	// PQ Max Brightness's real range is 100-10000 cd/m2;
+	// widened to 3 nibbles (0-4095) for ~2.4 cd/m2 per step, matching the
+	// camera firmware.
 	// step: 30 overrides the generic knob preset's default step (main.js's
 	// global `knobStep` config, default 4) -- too fine for a 9900 cd/m2 span.
 	dct_pq_max_bright: { name: 'PQ Max Brightness', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x22), nibbles: 3, step: 32 },
@@ -528,46 +528,47 @@ export const COMMANDS = {
 
 	dct_cnr_auto: { name: 'CNR Auto', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x11, 0x00), On: P(0x01, 0x7e, 0x01, 0x11, 0x01) } },
 	dct_cnr_mode: { name: 'CNR Mode', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x10), nibbles: 1 },
-	// dpf_enable no longer exists as a ProVideo command (removed same-day as
-	// dpf_strength in favor of a single dpf_denoise knob, see dct_dpf_strength
+	// A "DPF Enable" control no longer exists in camera firmware (removed
+	// along with a strength-only predecessor in favor of a single
+	// denoise-strength knob, see dct_dpf_strength
 	// below) -- there is nothing left to map On/Off to, so this button/
 	// inquiry is removed rather than kept as permanently-erroring dead code.
 	dct_dpf_strength: { name: 'DPF Strength', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x13), nibbles: 1 },
 	dct_filter_enable: { name: 'Filter Enable', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x14, 0x00), On: P(0x01, 0x7e, 0x01, 0x14, 0x01) } },
-	// real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL, firmware hard-rejects >=32);
-	// wire stays 2 nibbles (0-255, same as filter_denoise's real 0-255), but
+	// Filter Detail's real range is 0-31 (firmware hard-rejects >=32);
+	// wire stays 2 nibbles (0-255, same as Filter Denoise's real 0-255), but
 	// firmware now clamps raw values above 31 to 31 instead of erroring. `max`
 	// narrows the Companion-side UI/knob range to what's actually usable,
 	// instead of letting the wire's full 0-255 capacity leak through.
 	dct_filter_detail: { name: 'Filter Detail', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x15), nibbles: 2, max: 31 },
-	// real range is 0-255 (ISP_FLT_MAX_DENOISE_LVL); 1 nibble truncated it,
+	// Filter Denoise's real range is 0-255; 1 nibble truncated it,
 	// widened to 2 nibbles to match it exactly.
 	dct_filter_denoise: { name: 'Filter Denoise', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x16), nibbles: 2 },
 
-	// lut_mode's real settable range is 0-1 (LUT_MODE_INTERPOLATE/FAST_GAMMA,
-	// lut_drv.h); LUT_MODE_FIXED=2 exists in the enum but do_lut_mode
-	// explicitly rejects it with -EINVAL ("used only internally"). `max`
+	// LUT Mode's real settable range is 0-1; a third "fixed" mode
+	// exists in the camera but is explicitly rejected as
+	// "used only internally". `max`
 	// narrows the Companion-side UI/knob range from the wire's full 0-15.
 	dct_lut_mode: { name: 'LUT Mode', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x24), nibbles: 1, min: 0, max: 1 },
 	dct_lut_fixed_mode: { name: 'LUT Fixed Mode', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x25), nibbles: 1 },
 	dct_lut_preset: { name: 'LUT Preset', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x26), nibbles: 1 },
 
-	// do_sdi_range's own help text: "<flag> - set sdi range [0: legal, 1: full range]"
+	// SDI Range: 0 = legal range, 1 = full range.
 	dct_sdi_range: { name: 'SDI Range', group: 'System', kind: 'enum', choices: { Legal: P(0x01, 0x7e, 0x01, 0x30, 0x00), Full: P(0x01, 0x7e, 0x01, 0x30, 0x01) } },
-	// sdi_black's real range is signed -60..60 (do_sdi_black hard-rejects
-	// outside that with -EINVAL). Signed to match the BSP's bespoke two's-
-	// complement handling (it's no longer a generic unsigned DCT_VALUE
+	// SDI Black's real range is signed -60..60 (the camera hard-rejects
+	// outside that). Signed to match the firmware's bespoke two's-
+	// complement handling (it's no longer a generic unsigned
 	// passthrough, same fix as dct_slog3_gain); `min`/`max` narrow the
 	// Companion-side UI/knob range from the wire's full signed -128..127.
 	dct_sdi_black: { name: 'SDI Black', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x31), nibbles: 2, signed: true, min: -60, max: 60 },
-	// sdi_white's real range is signed -80..79 (do_sdi_white hard-rejects
-	// outside that with -EINVAL); same treatment as sdi_black above.
+	// SDI White's real range is signed -80..79 (the camera hard-rejects
+	// outside that); same treatment as SDI Black above.
 	dct_sdi_white: { name: 'SDI White', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x32), nibbles: 2, signed: true, min: -80, max: 79 },
 
 	// Independent Red/Green tally lamps -- set-only (no inquiry given).
 	// p: 2=On, 3=Off (standard VISCA on/off convention, not this module's
 	// own usual 0/1 enum style -- matches the real wire spec exactly).
-	// Yellow = both lamps on (sys_tally_light_t, driver/src/tally.c),
+	// Yellow = both lamps on,
 	// reached by sending Red On + Green On -- not a wire value of its own.
 	dct_tally_red: { name: 'Tally Red', group: 'System', kind: 'enum', choices: { On: P(0x01, 0x7e, 0x01, 0x0a, 0x00, 0x02), Off: P(0x01, 0x7e, 0x01, 0x0a, 0x00, 0x03) } },
 	// Second DCT sub-namespace (0x04, not 0x01) -- avoids colliding with
@@ -575,7 +576,7 @@ export const COMMANDS = {
 	dct_tally_green: { name: 'Tally Green', group: 'System', kind: 'enum', choices: { On: P(0x01, 0x7e, 0x04, 0x1a, 0x00, 0x02), Off: P(0x01, 0x7e, 0x04, 0x1a, 0x00, 0x03) } },
 
 	dct_audio_enable: { name: 'Audio Enable', group: 'Audio', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x65, 0x00), On: P(0x01, 0x7e, 0x01, 0x65, 0x01) } },
-	// audio_gain's real range is 0-65535 (4.12 fixed-point, 4096 = 1.0x unity
+	// Audio Gain's real range is 0-65535 (4.12 fixed-point, 4096 = 1.0x unity
 	// gain); kept at 3 nibbles (0-4095) with firmware scaling by 16 to cover
 	// 0-65520 -- the top 15 values are unreachable, an accepted tradeoff.
 	// logScale: the raw value is a linear amplitude multiplier, but audio
@@ -599,18 +600,17 @@ export const COMMANDS = {
 	},
 
 	// --- AEC (auto exposure control) individual fields ------------------------
-	// aec's real signature is "aec <enable> <setPoint> <speed> <clmTolerance>
-	// <costGain> <costTint> <costApt> <taf> <maxGain> <useCustomWeights>" --
-	// positional/cumulative (setting field N needs all preceding fields too).
-	// Firmware handles this via read-modify-write: it queries aec's current
-	// 10-value state, overrides just the one field below, and reissues the
-	// full command. VISCA/Companion only ever sends the ONE field's value.
-	// setPoint: real range 50-3000 (internal unitless ISP luminance-target
+	// The camera's AEC is a positional/cumulative multi-field setting (10
+	// fields; setting field N needs all preceding fields too).
+	// Firmware handles this via read-modify-write: it queries the AEC's
+	// current 10-value state, overrides just the one field below, and reissues
+	// the full command. VISCA/Companion only ever sends the ONE field's value.
+	// SetPoint: real range 50-3000 (an internal unitless luminance-target
 	// scalar); 3 nibbles (0-4095) clamp to it, no scaling needed. `min`/`max`
 	// narrow the Companion-side UI/knob range to what's actually usable,
 	// instead of letting the wire's full 0-4095 capacity leak through.
 	dct_aec_setpoint: { name: 'AEC SetPoint', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x18), nibbles: 3, min: 50, max: 3000 },
-	// speed: real range 1-30 (AEC_LOW_PASS_FILTER_SIZE_MIN/MAX); 2 nibbles
+	// Speed: real range 1-30; 2 nibbles
 	// (0-255) clamp to it, no scaling needed. Same `min`/`max` narrowing.
 	// logScale like Gain/Shutter (same reasoning: perceived/graded, not
 	// linear); no `format` -- raw IS the real value 1-30 already (no
@@ -619,8 +619,8 @@ export const COMMANDS = {
 	// gain/shutter's minStep:4 floor was sized for their 0-4095 raw space,
 	// not this 1-30 one -- default 1 is already the finest possible step here.
 	dct_aec_speed: { name: 'AEC Speed', group: 'Exposure', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x19), nibbles: 2, min: 1, max: 30, logScale: true, stepPercent: 5 },
-	// maxGain: real range 1000-45715 (same as cam_gain, same underlying
-	// isi_access_get_gain_range query) -- identical raw<->real formula, so
+	// Max Gain: real range 1000-45715 (same as cam_gain, same underlying
+	// camera gain-range query) -- identical raw<->real formula, so
 	// this gets the exact same treatment as cam_gain_direct, reusing
 	// gainRawToIso() directly rather than a new conversion function.
 	dct_aec_maxgain: {
@@ -657,18 +657,19 @@ export const INQUIRIES = {
 	rgain: { name: 'R Gain', varId: 'rgain', payload: P(0x09, 0x04, 0x43), decode: { type: 'value' } },
 	bgain: { name: 'Blue Gain', varId: 'bgain', payload: P(0x09, 0x04, 0x44), decode: { type: 'value' } },
 	color_temp: { name: 'Color Temp Preset', varId: 'color_temp', payload: P(0x09, 0x04, 0x20), decode: { type: 'value' } },
-	// The three fields of "wb_temp"'s bare dump ("<current> <min> <max>"),
+	// The three color-temperature fields (current/min/max -- the camera
+	// returns them as one combined "<current> <min> <max>" dump),
 	// each its own VISCA round-trip disambiguated by a selector byte
 	// (payload's last byte: 0/1/2) -- see COMMANDS.dct_wb_temp.
 	dct_wb_temp: { name: 'Color Temp (K)', varId: 'dct_wb_temp', payload: P(0x09, 0x7e, 0x01, 0x0b, 0x00), decode: { type: 'value' } },
 	dct_wb_temp_min: { name: 'Color Temp Min (K)', varId: 'dct_wb_temp_min', payload: P(0x09, 0x7e, 0x01, 0x0b, 0x01), decode: { type: 'value' } },
 	dct_wb_temp_max: { name: 'Color Temp Max (K)', varId: 'dct_wb_temp_max', payload: P(0x09, 0x7e, 0x01, 0x0b, 0x02), decode: { type: 'value' } },
-	// wb_temp_measure: the measured scene color temperature, inquiry-only
-	// (no ProVideo set handler exists for it at all).
+	// Measured scene color temperature, inquiry-only
+	// (the camera offers no way to set it at all).
 	dct_wb_temp_measure: { name: 'Color Temp Measured (K)', varId: 'dct_wb_temp_measure', payload: P(0x09, 0x7e, 0x01, 0x0c), decode: { type: 'value' } },
 	color_gain: { name: 'Color Gain', varId: 'color_gain', payload: P(0x09, 0x04, 0x49), decode: { type: 'value' } },
-	// nibbles:2 -- the real reply pads to "00 00 0p 0q" (reply_pq,
-	// visca_map_picture.c), so the two's-complement bit-width must be
+	// nibbles:2 -- the real reply pads to "00 00 0p 0q",
+	// so the two's-complement bit-width must be
 	// declared explicitly rather than inferred from the padded byte count.
 	color_hue: { name: 'Color Hue', varId: 'color_hue', payload: P(0x09, 0x04, 0x4f), decode: { type: 'value', signed: true, nibbles: 2 } },
 	gamma: { name: 'Gamma', varId: 'gamma', payload: P(0x09, 0x04, 0x5b), decode: { type: 'enum', map: ENUM.gamma }, once: true },

@@ -78,7 +78,7 @@ const CONFIRM_POLL_ENUM_IDS = new Set(['dct_sdi_range', 'dct_timecode_hold', 'dc
 const CONFIRM_POLL_INQUIRY_ID = { cam_ae: 'ae_mode', cam_wb: 'wb_mode' }
 
 // dct_ggain (kind:'enum', choices Reset/Up/Down) is semantically a RUD-style
-// gain_green control -- it just uses DCT-extension byte payloads instead of
+// gain control -- it just uses DCT-extension byte payloads instead of
 // the standard VISCA RUD template, so the generic 'rud' branch's RUD_INQUIRY_ID
 // handling doesn't apply to it. Give it the exact same unconditional
 // confirm+resync treatment as cam_rgain/cam_bgain (below), which it otherwise
@@ -96,39 +96,37 @@ const ENUM_RUD_INQUIRY_ID = { dct_ggain: 'dct_ggain' }
 // (insertion order == wire value 0,1,2... for both of these).
 const PRESET_KNOB_TARGET = { dct_tm_mode_preset: 'dct_tm_mode', dct_color_space_preset: 'dct_color_space' }
 
-// The firmware itself forces AE/AWB into Manual as a side effect of setting
-// these varIds (ae_ensure_manual()/visca_wb_ensure_manual() in the BSP's
-// VISCA layer -- same "the auto algorithm would silently overwrite this on
-// the next frame otherwise" reasoning for both), but nothing on the Companion
-// side otherwise knows that happened -- the AE/WB toggle buttons would keep
-// showing stale AUTO until the next full poll cycle (or forever, with
-// polling off). Re-confirm the affected mode right after any of these varIds
+// Older camera firmware used to force AE/AWB into Manual as a side effect
+// of setting these varIds -- current firmware no longer does. The immediate
+// re-confirm is kept anyway: it's a single cheap inquiry and (with polling
+// off) the only way the AE/WB toggle buttons notice a mode that changed
+// behind our back after one of these values was written. Re-confirm the
+// affected mode right after any of these varIds
 // is deliberately written (see setKnobValue() and applyInquiryReply()'s
 // resyncKnob branch below).
 const MODE_SIDE_EFFECT_INQUIRY = { gain: 'ae_mode', shutter: 'ae_mode', rgain: 'wb_mode', bgain: 'wb_mode', dct_ggain: 'wb_mode', dct_wb_temp: 'wb_mode' }
 
-// version_inq's model-id field (doc/VISCA.md "HH HH"; commands.js's 'version'
+// The version inquiry's model-id field (commands.js's 'version'
 // decode formats it as "...model=0x0000..."/"...model=0x0001..."). Camera
-// firmware distinguishes Violetta (ProVideo ISP) vs Marietta (Phoenix ISP)
-// this way -- see visca_map_system.c's version_inq handler in the BSP.
-const CAMERA_MODEL_BY_ID = { '0000': 'violetta', '0001': 'marietta' }
+// firmware distinguishes Atom Two vs Atom Two HDR this way.
+const CAMERA_MODEL_BY_ID = { '0000': 'atom-two', '0001': 'atom-two-hdr' }
 function parseCameraModel(versionText) {
 	const m = /model=0x([0-9a-f]+)/i.exec(versionText ?? '')
 	return m ? CAMERA_MODEL_BY_ID[m[1].padStart(4, '0').toLowerCase()] : undefined
 }
 
 // Commands/presets that don't apply to one of the two camera product lines
-// (confirmed: dpf_denoise/tm_mode genuinely require the Phoenix ISP, i.e.
-// Marietta-only, so both are unusable -- and thus hidden -- on Violetta;
-// filter_enable/filter_denoise/gain_mode are hidden on Marietta per product
+// (confirmed on real hardware: DPF Strength and Tone Mapping Mode only exist
+// on Atom Two HDR, so both are unusable -- and thus hidden -- on Atom Two;
+// Filter Enable/Filter Denoise/Gain Mode are hidden on Atom Two HDR per product
 // decision). Applied in setupActions()/setupPresets() and the poll filters
 // once the camera's model is known (see this.cameraModel, set from
 // applyInquiryReply()'s version-reply hook) -- unknown model means
-// unrestricted, so a camera whose firmware predates this model-id fix (or a
-// failed/slow version poll) never has controls incorrectly hidden.
+// unrestricted, so a camera whose firmware predates this model-id scheme (or
+// a failed/slow version poll) never has controls incorrectly hidden.
 const MODEL_GATED_IDS = {
-	violetta: ['dct_dpf_strength', 'dct_tm_mode', 'dct_tm_mode_preset'],
-	marietta: ['dct_filter_enable', 'dct_filter_denoise', 'dct_gain_mode'],
+	'atom-two': ['dct_dpf_strength', 'dct_tm_mode', 'dct_tm_mode_preset'],
+	'atom-two-hdr': ['dct_filter_enable', 'dct_filter_denoise', 'dct_gain_mode'],
 }
 
 // Knobs whose real command already has a proper RUD "Reset" (server-side
@@ -150,9 +148,9 @@ const KNOB_PRESS_DOWN = {
 // RUD reset, whose real landing value has to be confirmed via inquiry), the
 // generated action can write state/knob directly with no confirm-read needed.
 const KNOB_PRESS_SET_VALUE = {
-	cam_color_hue_direct: 0, // neutral hue -- no shift (post_hue signed -128..127)
-	// post_sat/post_cont's real factory default is 128 (0x80, "1.0x on
-	// Fixpoint 1.7") -- reset_settings_chain(), system_settings.c:690-692.
+	cam_color_hue_direct: 0, // neutral hue -- no shift (signed -128..127)
+	// Color Gain/Contrast's real factory default is 128 (0x80, "1.0x" on
+	// their fixed-point scales) -- confirmed against factory-default state.
 	cam_color_gain_direct: 128,
 	cam_contrast_direct: 128,
 	dct_wb_temp: 6500, // common daylight white-balance reference, per user request
@@ -164,7 +162,7 @@ const KNOB_PRESS_SET_VALUE = {
 // either lamp (commands.js's dct_tally_red/dct_tally_green are set-only),
 // so this optimistic local pair -- not a polled this.state value -- is the
 // source of truth once the user starts pressing the button. Yellow (both
-// lamps on, sys_tally_light_t) is included as its own cycle stop, reached
+// lamps on) is included as its own cycle stop, reached
 // by sending both Red On and Green On.
 const TALLY_CYCLE_STATES = [
 	{ red: false, green: false }, // Off
@@ -182,16 +180,16 @@ const TALLY_CYCLE_STATES = [
 // own reply first -- no artificial delay needed.
 const REFRESH_AFTER_IDS = new Set(['cam_settings_reset', 'dct_load_settings'])
 
-// FN_CAM_COLOR_TEMP's inquiry side (INQUIRIES.color_temp) has no case in the
-// BSP's wb_inquiry() -- there is no ProVideo command that reports which
-// wb_preset index is currently active, only ones that set it -- so it always
-// errors. Left in INQUIRIES so the variable/Companion definition still
+// The color-temp-preset inquiry side (INQUIRIES.color_temp) has no
+// inquiry that can answer it -- the camera has no command that reports
+// which preset index is currently active, only ones that set it -- so
+// it always errors. Left in INQUIRIES so the variable/Companion definition still
 // exists (setupVariables() derives its list from INQUIRIES), but excluded
 // from actual polling: sending it every cycle would be a wasted round trip
 // AND would keep stomping the optimistic value set below back to 'n/a'.
 //
 // dct_wb_temp_measure is excluded for a different reason -- it works fine
-// (wb_temp_measure_inquiry runs a real, fresh capture every request), it's
+// (the camera runs a real, fresh capture every request), it's
 // just meant to be on-demand only, via the dedicated "WB Kelvin Measure"
 // button/action (dct_wb_temp_measure_now), not refreshed automatically on
 // every poll tick.
@@ -223,7 +221,7 @@ class DctViscaInstance extends InstanceBase {
 		this.knobLockUntil = {} // per-varId: Date.now() ms until which background polling won't resync this.knob (see setKnobValue())
 		this.consecutiveTimeouts = 0 // see markNoReply()/markReplyReceived()
 		this.linkWarning = false // true once we've downgraded Ok -> UnknownWarning for no replies
-		this.cameraModel = undefined // 'violetta'|'marietta'|undefined (unknown -> unrestricted), see MODEL_GATED_IDS
+		this.cameraModel = undefined // 'atom-two'|'atom-two-hdr'|undefined (unknown -> unrestricted), see MODEL_GATED_IDS
 		this.tally = { red: false, green: false } // optimistic local state, see TALLY_CYCLE_STATES/dct_tally_cycle (no VISCA inquiry exists to read this back)
 		this.params = continuousParams()
 		this.paramById = Object.fromEntries(this.params.map((p) => [p.id, p]))
@@ -482,7 +480,7 @@ class DctViscaInstance extends InstanceBase {
 			const locked = (this.knobLockUntil[q.varId] ?? 0) > Date.now()
 			if (Number.isFinite(n) && (opts.resyncKnob || !locked)) this.knob[q.varId] = n
 		}
-		// Same AE/AWB-forced-manual side effect as setKnobValue() -- this
+		// Same AE/WB mode re-confirm as setKnobValue() -- this
 		// covers the RUD/enum confirm-read path (Gain/Shutter/Red/Blue/Green
 		// Gain Reset/Up/Down), which never calls setKnobValue() itself.
 		// resyncKnob-gated for the same reason as the knob resync above: only
