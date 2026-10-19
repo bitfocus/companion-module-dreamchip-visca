@@ -200,6 +200,7 @@ export const PROVIDEO_NAMES = {
 	dct_lut_mode: { cmd: 'lut_mode', scaled: true, note: 'real settable range is 0-1 (Interpolate/Fast Gamma, lut_drv.h); do_lut_mode rejects LUT_MODE_FIXED=2 with -EINVAL ("used only internally")' },
 	dct_lut_fixed_mode: { cmd: 'lut_fixed_mode', scaled: false },
 	dct_lut_preset: { cmd: 'lut_preset', scaled: false },
+	dct_lut_fast_gamma: { cmd: 'lut_fast_gamma', scaled: true, note: 'real range is 1100-3000 (gamma x 1000, i.e. 1.1-3.0); raw pq 0-237 maps to 1100+pq*8 (0.008 steps), pq 238-255 clamp to 3000 but read back as 237; inquiry floors (gamma-1100)/8' },
 	dct_sdi_range: { cmd: 'sdi_range', scaled: false },
 	dct_sdi_black: { cmd: 'sdi_black', scaled: true, note: 'real range is signed -60..60; do_sdi_black hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled' },
 	dct_sdi_white: { cmd: 'sdi_white', scaled: true, note: 'real range is signed -80..79; do_sdi_white hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled' },

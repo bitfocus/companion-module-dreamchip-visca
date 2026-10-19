@@ -7,7 +7,7 @@ unexpected (error code, wrong value, etc.). The 4 toggle-button rows (Audio,
 SDI, Timecode) and "WB Kelvin Measure" are Companion-only additions with no
 `COMMANDS` entry of their own (see `main.js`), so they're listed here by hand.
 
-Total: 96 command test cases, 54 inquiries.
+Total: 97 command test cases, 55 inquiries.
 
 An automated equivalent of this plan lives at `tools/camera-check.mjs` -- it
 sends the same commands over a real serial connection and validates the
@@ -74,6 +74,7 @@ necessarily via the recurring poll.
 | LUT Mode | lut_mode <raw=<value>>  // real settable range is 0-1 (Interpolate/Fast Gamma, lut_drv.h); do_lut_mode rejects LUT_MODE_FIXED=2 with -EINVAL ("used only internally") | [ Y] | |
 | LUT Fixed Mode | lut_fixed_mode <value> | [ Y] | |
 | LUT Preset | lut_preset <value> | [ Y] | |
+| LUT Fast Gamma | lut_fast_gamma <raw=<value>>  // real range is 1100-3000 (gamma x 1000, i.e. 1.1-3.0); raw pq 0-237 maps to 1100+pq*8 (0.008 steps), pq 238-255 clamp to 3000 but read back as 237; inquiry floors (gamma-1100)/8 | [ ] | |
 | SDI Range: Legal | sdi_range 0 | [ Y] | |
 | SDI Range: Full | sdi_range 1 | [ Y] | |
 | SDI: Toggle Legal/Full | sdi_range 0 or 1 (Companion-only toggle, see main.js) | [ ] | |
@@ -213,6 +214,7 @@ necessarily via the recurring poll.
 | LUT Mode | real settable range is 0-1 (Interpolate/Fast Gamma, lut_drv.h); do_lut_mode rejects LUT_MODE_FIXED=2 with -EINVAL ("used only internally") | [ ] | |
 | LUT Fixed Mode | lut_fixed_mode | [ ] | |
 | LUT Preset | lut_preset | [ ] | |
+| LUT Fast Gamma | real range is 1100-3000 (gamma x 1000, i.e. 1.1-3.0); raw pq 0-237 maps to 1100+pq*8 (0.008 steps), pq 238-255 clamp to 3000 but read back as 237; inquiry floors (gamma-1100)/8 | [ ] | |
 | SDI Range | sdi_range | [ ] | |
 | SDI Black | real range is signed -60..60; do_sdi_black hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ ] | |
 | SDI White | real range is signed -80..79; do_sdi_white hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ ] | |

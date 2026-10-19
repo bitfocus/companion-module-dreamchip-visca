@@ -29,6 +29,7 @@ import {
 	hueRawToDeg,
 	wbGainFactor,
 	saturationFactor,
+	lutFastGammaRawToGamma,
 	progressBar,
 	RUD,
 	TERMINATOR,
@@ -751,6 +752,31 @@ test("continuousParams' LUT Mode entry is narrowed to 0-1 (LUT_MODE_FIXED=2 is r
 	assert.equal(p.max, 1)
 })
 
+test('LUT Fast Gamma (direct, SS 0x27) builds the exact 2-nibble wire frame and pairs with a value inquiry', () => {
+	const c = COMMANDS.dct_lut_fast_gamma
+	assert.equal(c.kind, 'direct')
+	assert.deepEqual(c.prefix, [0x01, 0x7e, 0x01, 0x27])
+	assert.equal(c.nibbles, 2)
+	// pq 140 -> 0x8C -> nibbles 8,12 (the value the camera's 2.222 default reads back as)
+	assert.deepEqual(
+		[...buildFrame(1, [...c.prefix, ...encodeNibbles(140, c.nibbles)])],
+		[0x81, 0x01, 0x7e, 0x01, 0x27, 0x08, 0x0c, 0xff],
+	)
+	assert.equal(decodeNibbles(encodeNibbles(237, c.nibbles)), 237)
+	const q = INQUIRIES.dct_lut_fast_gamma
+	assert.deepEqual(q.payload, [0x09, 0x7e, 0x01, 0x27])
+	assert.equal(q.decode.type, 'value')
+	assert.equal(q.once, true)
+	// a 2-nibble reply padded to the firmware's usual "00 00 0p 0q" shape
+	assert.equal(decodeReply(q.decode, Buffer.from([0x00, 0x00, 0x08, 0x0c])), '140')
+})
+
+test("continuousParams' LUT Fast Gamma entry is narrowed to 0-237 (every value round-trips), not the wire's full 0-255", () => {
+	const p = continuousParams().find((x) => x.id === 'dct_lut_fast_gamma')
+	assert.equal(p.min, 0)
+	assert.equal(p.max, 237)
+})
+
 test('dct_tm_mode is exposed (0-4, direct + 5-choice preset) now that the BSP fixed tm_mode\'s "off" hack', () => {
 	const c = COMMANDS.dct_tm_mode
 	assert.equal(c.kind, 'direct')
@@ -839,12 +865,12 @@ test("continuousParams' Gain (direct) entry is logScale with a 4-raw-unit minimu
 
 // --- two-tier polling (main.js pollLiveOnce()/pollStartupOnce()) -----------
 
-test('exactly the 36 calibration/setup-style inquiries are tagged once:true (startup-only tier)', () => {
+test('exactly the 37 calibration/setup-style inquiries are tagged once:true (startup-only tier)', () => {
 	const onceIds = Object.entries(INQUIRIES)
 		.filter(([, q]) => q.once)
 		.map(([id]) => id)
 		.sort()
-	assert.equal(onceIds.length, 36)
+	assert.equal(onceIds.length, 37)
 	assert.deepEqual(
 		onceIds,
 		[
@@ -852,7 +878,7 @@ test('exactly the 36 calibration/setup-style inquiries are tagged once:true (sta
 			'dct_auto_save', 'dct_awb_speed', 'dct_black_blue', 'dct_black_green', 'dct_black_master',
 			'dct_black_red', 'dct_cnr_auto', 'dct_cnr_mode', 'dct_color_space',
 			'dct_dpf_strength', 'dct_filter_denoise', 'dct_filter_detail', 'dct_filter_enable',
-			'dct_flare_blue', 'dct_flare_green', 'dct_flare_red', 'dct_gain_mode', 'dct_lut_fixed_mode',
+			'dct_flare_blue', 'dct_flare_green', 'dct_flare_red', 'dct_gain_mode', 'dct_lut_fast_gamma', 'dct_lut_fixed_mode',
 			'dct_lut_mode', 'dct_lut_preset', 'dct_mcc_opmode', 'dct_osd', 'dct_pq_max_bright',
 			'dct_sdi_black', 'dct_sdi_white', 'dct_slog3_gain', 'dct_tm_mode', 'flicker', 'flip',
 			'gamma', 'version', 'video_mode',
@@ -943,6 +969,12 @@ test('wbGainFactor/saturationFactor render unity gain (raw=256/128) as 1.00', ()
 	assert.equal(wbGainFactor(512), '2.00')
 	assert.equal(saturationFactor(128), '1.00')
 	assert.equal(saturationFactor(64), '0.50')
+})
+
+test('lutFastGammaRawToGamma inverts the firmware pq->gamma offset+scale (min/default/max)', () => {
+	assert.equal(lutFastGammaRawToGamma(0), '1.100')
+	assert.equal(lutFastGammaRawToGamma(140), '2.220') // the camera's 2.222 default reads back as pq 140
+	assert.equal(lutFastGammaRawToGamma(237), '2.996')
 })
 
 test('every knob-backed param with a format() renders a non-empty string for its min and max', () => {

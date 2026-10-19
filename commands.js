@@ -172,6 +172,11 @@ export function wbGainFactor(raw) {
 export function saturationFactor(raw) {
 	return (raw / 128).toFixed(2)
 }
+// LUT Fast Gamma's wire value pq is offset+scaled by the camera firmware onto
+// the real gamma: gamma = (1100 + pq*8) / 1000, so raw 140 displays as 2.220.
+export function lutFastGammaRawToGamma(raw) {
+	return ((1100 + raw * 8) / 1000).toFixed(3)
+}
 
 // --- codec (ported from visca_frame.py) ------------------------------------
 export function encodeNibbles(value, n) {
@@ -552,6 +557,17 @@ export const COMMANDS = {
 	dct_lut_mode: { name: 'LUT Mode', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x24), nibbles: 1, min: 0, max: 1 },
 	dct_lut_fixed_mode: { name: 'LUT Fixed Mode', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x25), nibbles: 1 },
 	dct_lut_preset: { name: 'LUT Preset', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x26), nibbles: 1 },
+	// LUT Fast Gamma: the camera firmware offset+scales the 2-nibble wire
+	// value pq onto a real gamma of (1100 + pq*8)/1000, so pq 0..237 spans
+	// 1.100..2.996 in exact 0.008 steps and round-trips the inquiry losslessly
+	// (the camera's 2.222 default reads back as pq 140). pq 238..255 all clamp
+	// to a real 3.000 but the inquiry floors back to 237 (displayed 2.996), so
+	// `max` stops the knob at 237 -- the last value whose set/read-back agree,
+	// sparing the knob a visible one-step snap-back after every poll.
+	dct_lut_fast_gamma: {
+		name: 'LUT Fast Gamma', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x27), nibbles: 2, min: 0, max: 237,
+		format: (raw) => `Gamma ${lutFastGammaRawToGamma(raw)}`,
+	},
 
 	// SDI Range: 0 = legal range, 1 = full range.
 	dct_sdi_range: { name: 'SDI Range', group: 'System', kind: 'enum', choices: { Legal: P(0x01, 0x7e, 0x01, 0x30, 0x00), Full: P(0x01, 0x7e, 0x01, 0x30, 0x01) } },
@@ -703,6 +719,7 @@ export const INQUIRIES = {
 	dct_lut_mode: { name: 'LUT Mode', varId: 'dct_lut_mode', payload: P(0x09, 0x7e, 0x01, 0x24), decode: { type: 'value' }, once: true },
 	dct_lut_fixed_mode: { name: 'LUT Fixed Mode', varId: 'dct_lut_fixed_mode', payload: P(0x09, 0x7e, 0x01, 0x25), decode: { type: 'value' }, once: true },
 	dct_lut_preset: { name: 'LUT Preset', varId: 'dct_lut_preset', payload: P(0x09, 0x7e, 0x01, 0x26), decode: { type: 'value' }, once: true },
+	dct_lut_fast_gamma: { name: 'LUT Fast Gamma', varId: 'dct_lut_fast_gamma', payload: P(0x09, 0x7e, 0x01, 0x27), decode: { type: 'value' }, once: true },
 	// Not once:true (unlike its SDI Black/White neighbors below): backs the
 	// "SDI: Toggle Legal/Full" button's live status display, which should
 	// track real-time state even if changed by another controller.
