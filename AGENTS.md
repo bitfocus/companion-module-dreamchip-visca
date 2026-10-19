@@ -67,6 +67,12 @@ ESM (`"type": "module"`) JS that Companion loads directly via
   exists, so `confirmIfNotPolling` can't apply; the cycle button tracks
   optimistic local state (`this.tally` / `TALLY_CYCLE_STATES` in main.js).
   Same applies to any future set-only command.
+- Status model: `Ok` is only ever earned by a real VISCA terminal reply
+  (`markReplyReceived`/`confirmedReply`) — TCPHelper's Ok-on-connect is
+  deliberately suppressed to `Connecting`, silence downgrades to
+  `UnknownWarning`, and serial (unlike TCP) has its own 2s reconnect timer
+  (`scheduleSerialReconnect`). Don't "simplify" these back to
+  updateStatus(Ok) on socket open.
 - pnpm users: `@serialport/bindings-cpp` native build must be approved
   (`allowBuilds` in `pnpm-workspace.yaml`). `package-lock.json` and
   `pnpm-lock.yaml` both exist — update whichever lockfile matches your

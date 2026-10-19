@@ -221,18 +221,24 @@ class DctViscaInstance extends InstanceBase {
 		this.knobLockUntil = {} // per-varId: Date.now() ms until which background polling won't resync this.knob (see setKnobValue())
 		this.consecutiveTimeouts = 0 // see markNoReply()/markReplyReceived()
 		this.linkWarning = false // true once we've downgraded Ok -> UnknownWarning for no replies
+		this.confirmedReply = false // first VISCA reply of the current (re)connection seen yet -- gates Ok (see markReplyReceived())
+		this.serialReconnectTimer = undefined // see scheduleSerialReconnect()
 		this.cameraModel = undefined // 'atom-two'|'atom-two-hdr'|undefined (unknown -> unrestricted), see MODEL_GATED_IDS
 		this.tally = { red: false, green: false } // optimistic local state, see TALLY_CYCLE_STATES/dct_tally_cycle (no VISCA inquiry exists to read this back)
 		this.params = continuousParams()
 		this.paramById = Object.fromEntries(this.params.map((p) => [p.id, p]))
 		this.availableSerialPorts = [] // cached SerialPort.list() entries ({path, vendorId, manufacturer}), for the config editor's Serial port dropdown
+		this.serialCameras = {} // path -> {camera, at} from probeSerialPorts(), annotates the dropdown
+		this.probingPorts = false // re-entrancy guard for probeSerialPorts()
+		this.serialProbeInterestUntil = 0 // probe only while the config editor was opened recently (see getConfigFields())
+		this.destroyed = false // late async guards (serial probe)
 
 		this.setupActions()
 		this.setupFeedbacks()
 		this.setupVariables()
 		this.setupPresets()
-		await this.refreshSerialPorts()
-		this.serialPortScanTimer = setInterval(() => this.refreshSerialPorts(), 5000)
+		this.serialPortScanTimer = setInterval(() => void this.scanAndProbeSerialPorts().catch(() => {}), 5000)
+		await this.scanAndProbeSerialPorts()
 		await this.initTransport()
 		this.startPolling()
 	}
@@ -263,14 +269,92 @@ class DctViscaInstance extends InstanceBase {
 	// neither and show up whether or not anything is wired to them at all.
 	// This is the only cross-platform "is a real device attached" signal
 	// SerialPort.list() offers without opening/probing every port.
+	// Windows needs the stricter vendorId-only rule: its onboard ACPI/PnP
+	// UARTs report SPDRP_MFG "Microsoft" (manufacturer-only, no VID_ in the
+	// PnP instance id), which the loose unix test would wave through -- any
+	// genuinely USB-attached port always has a vendorId on all three OSes
+	// (serialport parses VID_xxxx / USB-ancestor properties for it).
 	isSerialAdapterPort(p) {
-		return !!(p.vendorId || p.manufacturer)
+		return process.platform === 'win32' ? !!p.vendorId : !!(p.vendorId || p.manufacturer)
+	}
+
+	async scanAndProbeSerialPorts() {
+		await this.refreshSerialPorts()
+		await this.probeSerialPorts()
+	}
+
+	// A port showing up in SerialPort.list() says nothing about a camera being
+	// behind it (bare USB-serial adapters appear whether or not anything is
+	// wired), so while no live connection exists we probe candidates directly:
+	// open at the configured baud, fire the version inquiry, and any complete
+	// frame back within ~1s proves a VISCA device is listening. Results mark
+	// the config dropdown with "(camera found)". Probing runs only while the
+	// config editor has been opened recently (getConfigFields() is the closest
+	// thing to a click event this SDK offers) -- we don't keep opening random
+	// ports forever behind the user's back -- never in TCP mode, never on the
+	// instance's own configured port (that would race the connect/reconnect
+	// loop), and never while already connected.
+	async probeSerialPorts() {
+		if (this.config?.conn !== 'serial' || this.probingPorts || this.socket?.isConnected) return
+		if (Date.now() > this.serialProbeInterestUntil) return
+		this.probingPorts = true
+		try {
+			const filterAdapters = this.config.serialFilterAdapters !== false
+			const candidates = (this.availableSerialPorts ?? [])
+				.filter((p) => (!filterAdapters || this.isSerialAdapterPort(p)) && p.path !== this.config.serialPort)
+				.slice(0, 8)
+			const baudRate = Number(this.config.baud) || 115200
+			const address = Number(this.config.address) || 1
+			for (const p of candidates) {
+				if (this.destroyed || this.socket?.isConnected) break // instance gone or user just went live -- stop poking around
+				const camera = await this.probeSerialPort(p.path, baudRate, address)
+				this.serialCameras[p.path] = { camera, at: Date.now() }
+				if (camera) this.log('debug', `serial probe: camera found on ${p.path}`)
+			}
+		} finally {
+			this.probingPorts = false
+		}
+	}
+
+	async probeSerialPort(path, baudRate, address) {
+		let port
+		try {
+			const { SerialPort } = await import('serialport')
+			port = new SerialPort({ path, baudRate, dataBits: 8, parity: 'none', stopBits: 1, autoOpen: false })
+			port.on('error', () => {}) // swallow "can't open"-style events; open() cb + timeout cover the outcome
+			await new Promise((resolve, reject) => port.open((err) => (err ? reject(err) : resolve())))
+			const frame = buildFrame(address, INQUIRIES.version.payload)
+			return await new Promise((resolve) => {
+				let buf = Buffer.alloc(0)
+				const done = (found) => {
+					clearTimeout(timer)
+					port.off('data', onData)
+					resolve(found)
+				}
+				const onData = (chunk) => {
+					buf = Buffer.concat([buf, chunk])
+					if (buf.includes(TERMINATOR)) done(true)
+				}
+				const timer = setTimeout(() => done(false), 1000)
+				port.on('data', onData)
+				port.write(Buffer.from(frame), (err) => {
+					if (err) done(false)
+				})
+			})
+		} catch (_) {
+			// can't open (busy/in use by another app) or no reply -- either way,
+			// no camera marker; the two are indistinguishable and both unhelpful
+			return false
+		} finally {
+			if (port?.isOpen) port.close(() => {})
+		}
 	}
 
 	// --- transport ---------------------------------------------------------
 	async initTransport() {
 		this.consecutiveTimeouts = 0
 		this.linkWarning = false
+		this.confirmedReply = false // a fresh transport must earn Ok again on the first real reply
 		if (this.config?.conn === 'serial') {
 			await this.initSerial()
 		} else {
@@ -279,13 +363,17 @@ class DctViscaInstance extends InstanceBase {
 	}
 
 	// A terminal reply (Completion 0x50 or Error 0x60 -- see handleFrame())
-	// proves something is actually answering on the wire. Promotes back to
-	// Ok if markNoReply() had previously downgraded to Warning.
+	// proves something is actually answering on the wire. This is the ONLY
+	// thing that earns Ok: a bare TCP/serial link coming up proves nothing
+	// about the camera (initTCP()/initSerial() hold at Connecting until this
+	// fires; the serial link can even "open" with no adapter wired at all).
+	// Also promotes back to Ok after markNoReply() downgraded to Warning.
 	markReplyReceived() {
 		this.consecutiveTimeouts = 0
-		if (this.linkWarning) {
+		if (this.linkWarning || !this.confirmedReply) {
 			this.linkWarning = false
-			this.updateStatus(InstanceStatus.Ok)
+			this.confirmedReply = true
+			if (this.socket?.isConnected) this.updateStatus(InstanceStatus.Ok)
 		}
 	}
 
@@ -306,7 +394,15 @@ class DctViscaInstance extends InstanceBase {
 	}
 
 	async initSerial() {
+		if (this.serialReconnectTimer) {
+			clearTimeout(this.serialReconnectTimer)
+			this.serialReconnectTimer = undefined
+		}
 		if (this.socket) {
+			// Intentional teardown -- destroy() sets the adapter's closing flag,
+			// so its 'close' handler knows this is not a link drop and stays out
+			// of the status/reconnect path (which used to flash Disconnected and
+			// race the new port opening).
 			this.socket.destroy()
 			this.socket = undefined
 		}
@@ -328,8 +424,9 @@ class DctViscaInstance extends InstanceBase {
 		this.updateStatus(InstanceStatus.Connecting)
 		const port = new SerialPort({ path, baudRate, dataBits: 8, parity: 'none', stopBits: 1, autoOpen: false })
 		// Adapt the SerialPort to the small interface pump()/pollOnce()/feedbacks use.
-		this.socket = {
+		const adapter = {
 			isConnected: false,
+			closing: false, // true once we tear it down on purpose -- see the 'close' handler
 			send: (buf) => {
 				try {
 					port.write(Buffer.from(buf))
@@ -338,6 +435,7 @@ class DctViscaInstance extends InstanceBase {
 				}
 			},
 			destroy: () => {
+				adapter.closing = true
 				try {
 					if (port.isOpen) port.close(() => {})
 				} catch (_) {
@@ -345,6 +443,7 @@ class DctViscaInstance extends InstanceBase {
 				}
 			},
 		}
+		this.socket = adapter
 		port.on('open', () => {
 			// Half-duplex RS-485 adapters need DTR+RTS asserted or TX never reaches the camera.
 			try {
@@ -352,17 +451,24 @@ class DctViscaInstance extends InstanceBase {
 			} catch (_) {
 				// ignore
 			}
-			this.socket.isConnected = true
-			this.updateStatus(InstanceStatus.Ok)
+			adapter.isConnected = true
+			// A serial port "open" proves nothing about the camera -- a bare UART
+			// has no peer detection at all -- so hold Connecting until the first
+			// real reply (markReplyReceived()); only a known-good session that
+			// merely re-opened (this confirmedReply) goes straight back to Ok.
+			if (this.confirmedReply) this.updateStatus(InstanceStatus.Ok)
 			this.checkFeedbacks('connected')
 			this.pump()
 			this.pollStartupOnce()
 		})
 		port.on('data', (chunk) => this.onData(chunk))
 		port.on('close', () => {
-			if (this.socket) this.socket.isConnected = false
+			if (adapter.closing) return // our own teardown, not a link drop
+			adapter.isConnected = false
+			this.confirmedReply = false // a re-opened port must earn Ok again
 			this.updateStatus(InstanceStatus.Disconnected)
 			this.checkFeedbacks('connected')
+			this.scheduleSerialReconnect()
 		})
 		port.on('error', (err) => {
 			this.log('error', `serial error: ${err.message}`)
@@ -372,8 +478,23 @@ class DctViscaInstance extends InstanceBase {
 			if (err) {
 				this.log('error', `serial open: ${err.message}`)
 				this.updateStatus(InstanceStatus.ConnectionFailure, err.message)
+				// e.g. USB adapter unplugged -- retry on its own instead of
+				// sitting dead until a config change or instance toggle.
+				this.scheduleSerialReconnect()
 			}
 		})
+	}
+
+	// The serial counterpart of TCPHelper's built-in reconnect_interval: a
+	// dropped or unopenable port retries every 2s (Connecting -> open attempt),
+	// matching the TCP flow the guidelines describe (error -> retry -> Ok).
+	scheduleSerialReconnect() {
+		if (this.serialReconnectTimer || !this.config) return
+		this.serialReconnectTimer = setTimeout(() => {
+			this.serialReconnectTimer = undefined
+			this.updateStatus(InstanceStatus.Connecting)
+			this.initSerial()
+		}, 2000)
 	}
 
 	initTCP() {
@@ -390,7 +511,18 @@ class DctViscaInstance extends InstanceBase {
 		this.updateStatus(InstanceStatus.Connecting)
 		this.socket = new TCPHelper(host, port)
 		this.socket.on('status_change', (s, m) => {
-			this.updateStatus(s, m)
+			// TCPHelper reports Ok the moment the TCP socket connects, but an
+			// open port proves nothing about the camera (something else may be
+			// listening, or it may never answer VISCA) -- hold Connecting until
+			// the first real reply (markReplyReceived()) earns Ok.
+			if (s === InstanceStatus.Ok && !this.confirmedReply) {
+				this.updateStatus(InstanceStatus.Connecting)
+			} else {
+				// Any link loss un-confirms the session, so the next connect's
+				// TCPHelper Ok is suppressed until the camera replies again.
+				if (s !== InstanceStatus.Ok && s !== InstanceStatus.UnknownWarning) this.confirmedReply = false
+				this.updateStatus(s, m)
+			}
 			this.checkFeedbacks('connected')
 		})
 		this.socket.on('error', (err) => {
@@ -1088,10 +1220,18 @@ class DctViscaInstance extends InstanceBase {
 	// --- lifecycle ---------------------------------------------------------
 	getConfigFields() {
 		// Companion re-invokes getConfigFields() fresh each time the editor
-		// opens, reading whatever was last saved -- so toggling the checkbox
-		// below takes effect the next time the editor is reopened, not live
-		// as it's clicked (dropdown `choices` can't react to a sibling
-		// field's in-progress edit, only `isVisible` gets the live values).
+		// opens -- the closest this SDK gets to a "popup was clicked" event.
+		// Use it to keep the serial camera probe alive while the user is
+		// actually looking at the port dropdown (and kick one immediately;
+		// results show up in the dropdown on this or the next editor open).
+		// Same fresh-each-open behavior is why toggling the checkbox below
+		// takes effect the next time the editor is reopened, not live as it's
+		// clicked (dropdown `choices` can't react to a sibling field's
+		// in-progress edit, only `isVisible` gets the live values).
+		if (this.config?.conn === 'serial') {
+			this.serialProbeInterestUntil = Date.now() + 30000
+			void this.scanAndProbeSerialPorts().catch(() => {})
+		}
 		const filterAdapters = this.config?.serialFilterAdapters !== false
 		const filteredPorts = (this.availableSerialPorts ?? []).filter((p) => !filterAdapters || this.isSerialAdapterPort(p))
 		// The one-and-only fallback for "nothing was scanned" needs to actually
@@ -1100,22 +1240,35 @@ class DctViscaInstance extends InstanceBase {
 		// port on a Linux box that's never had a COM3 in its life, and vice
 		// versa for a Linux path leaking into a Windows config.
 		const isPlausiblePortPath = (path) => (process.platform === 'win32' ? /^COM\d+$/i.test(path) : path.startsWith('/dev/'))
-		const platformDefaultPort = process.platform === 'win32' ? 'COM3' : '/dev/ttyUSB0'
+		// macOS needs its own hint: list() there reports /dev/cu.*/tty.* style
+		// paths, so a linux "/dev/ttyUSB0" placeholder would look foreign (and
+		// still pass the /dev/ plausibility test) on a Mac.
+		const platformDefaultPort = process.platform === 'win32' ? 'COM3' : process.platform === 'darwin' ? '/dev/cu.usbserial' : '/dev/ttyUSB0'
 		const savedPort = this.config?.serialPort
 		const fallbackPort = savedPort && isPlausiblePortPath(savedPort) ? savedPort : platformDefaultPort
 		const serialPortChoices = filteredPorts.length ? filteredPorts.map((p) => p.path) : [fallbackPort]
 		return [
 			{ type: 'static-text', id: 'info', width: 12, label: 'DCT VISCA', value: 'Raw VISCA over TCP or serial (RS-485/RS-232). For serial, run Companion on the machine wired to the camera.' },
 			{ type: 'dropdown', id: 'conn', label: 'Connection', width: 4, default: 'tcp', choices: [{ id: 'tcp', label: 'TCP' }, { id: 'serial', label: 'Serial (COM)' }] },
-			{ type: 'textinput', id: 'host', label: 'Target IP', width: 5, default: '127.0.0.1', regex: Regex.IP, isVisible: (c) => c.conn !== 'serial' },
+			// No pre-filled host on a fresh instance (empty until the user picks
+			// one -- initSerial/initTCP then report BadConfig until it's set);
+			// whatever was entered on the first save is remembered in the config
+			// itself, which the editor shows over this default on every reopen.
+			{ type: 'textinput', id: 'host', label: 'Target IP', width: 5, default: '', regex: Regex.IP, isVisible: (c) => c.conn !== 'serial' },
 			{ type: 'number', id: 'port', label: 'TCP port', width: 3, default: 4000, min: 1, max: 65535, isVisible: (c) => c.conn !== 'serial' },
 			{
 				type: 'dropdown',
 				id: 'serialPort',
 				label: 'Serial port',
 				width: 5,
-				default: serialPortChoices[0],
-				choices: serialPortChoices.map((p) => ({ id: p, label: p })),
+				// Same "blank first time, remembered afterwards" rule as host
+				// above: nothing pre-selected on a fresh instance (the saved
+				// value wins over this default once one exists), and a scan
+				// that found no ports only offers the plausible-path hint.
+				// Ports the probe saw answer a VISCA inquiry get a "(camera
+				// found)" marker; the id stays the bare path.
+				default: '',
+				choices: serialPortChoices.map((p) => ({ id: p, label: this.serialCameras?.[p]?.camera ? `${p} (camera found)` : p })),
 				allowCustom: true,
 				isVisible: (c) => c.conn === 'serial',
 			},
@@ -1178,8 +1331,10 @@ class DctViscaInstance extends InstanceBase {
 	}
 
 	async destroy() {
+		this.destroyed = true
 		this.stopPolling()
 		if (this.serialPortScanTimer) clearInterval(this.serialPortScanTimer)
+		if (this.serialReconnectTimer) clearTimeout(this.serialReconnectTimer)
 		if (this.inflight?.timer) clearTimeout(this.inflight.timer)
 		if (this.socket) this.socket.destroy()
 	}
