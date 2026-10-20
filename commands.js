@@ -566,6 +566,10 @@ export const COMMANDS = {
 	// sparing the knob a visible one-step snap-back after every poll.
 	dct_lut_fast_gamma: {
 		name: 'LUT Fast Gamma', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x27), nibbles: 2, min: 0, max: 237,
+		// default knob step (config knobStep, 4) would move 0.032 gamma per
+		// turn; this knob's useful resolution is the finest wire step (1 pq =
+		// 0.008 gamma).
+		step: 1,
 		format: (raw) => `Gamma ${lutFastGammaRawToGamma(raw)}`,
 	},
 

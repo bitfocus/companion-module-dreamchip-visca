@@ -775,6 +775,8 @@ test("continuousParams' LUT Fast Gamma entry is narrowed to 0-237 (every value r
 	const p = continuousParams().find((x) => x.id === 'dct_lut_fast_gamma')
 	assert.equal(p.min, 0)
 	assert.equal(p.max, 237)
+	// finest resolution (1 pq = 0.008 gamma), not the generic knobStep default of 4
+	assert.equal(p.step, 1)
 })
 
 test('dct_tm_mode is exposed (0-4, direct + 5-choice preset) now that the BSP fixed tm_mode\'s "off" hack', () => {

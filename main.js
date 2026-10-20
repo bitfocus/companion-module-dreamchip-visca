@@ -155,6 +155,12 @@ const KNOB_PRESS_SET_VALUE = {
 	cam_contrast_direct: 128,
 	dct_wb_temp: 6500, // common daylight white-balance reference, per user request
 	dct_audio_gain: 256, // per user request
+	// LUT Fast Gamma reset target: standard gamma 2.2 (per user request). The
+	// wire grid (1100 + pq*8) can't hit 2.200 exactly -- pq 137 lands on 2.196
+	// and 138 on 2.204, an exact tie, resolved by rounding up (same
+	// convention as the ISO display); both read back identically to what's
+	// written, so the knob never snaps.
+	dct_lut_fast_gamma: 138,
 }
 
 // dct_tally_cycle's press order (main.js setupActions()); each state is the
@@ -1234,19 +1240,17 @@ class DctViscaInstance extends InstanceBase {
 		}
 		const filterAdapters = this.config?.serialFilterAdapters !== false
 		const filteredPorts = (this.availableSerialPorts ?? []).filter((p) => !filterAdapters || this.isSerialAdapterPort(p))
-		// The one-and-only fallback for "nothing was scanned" needs to actually
-		// look like a path on THIS platform -- otherwise a connection created
-		// (or last saved) on Windows shows a stray "COM3" as if it were a live
-		// port on a Linux box that's never had a COM3 in its life, and vice
-		// versa for a Linux path leaking into a Windows config.
+		// When the scan finds no ports at all, fall back to the last saved one
+		// (only if it looks like a path on THIS platform -- otherwise a
+		// connection created (or last saved) on Windows shows a stray "COM3"
+		// as if it were a live port on a Linux box that's never had a COM3 in
+		// its life, and vice versa), else a neutral type-manually placeholder:
+		// modern Windows assigns COM numbers dynamically per device (anything
+		// 1-255), so a "default port" hint like "COM3" would be a misleading
+		// guess rather than a helpful one.
 		const isPlausiblePortPath = (path) => (process.platform === 'win32' ? /^COM\d+$/i.test(path) : path.startsWith('/dev/'))
-		// macOS needs its own hint: list() there reports /dev/cu.*/tty.* style
-		// paths, so a linux "/dev/ttyUSB0" placeholder would look foreign (and
-		// still pass the /dev/ plausibility test) on a Mac.
-		const platformDefaultPort = process.platform === 'win32' ? 'COM3' : process.platform === 'darwin' ? '/dev/cu.usbserial' : '/dev/ttyUSB0'
 		const savedPort = this.config?.serialPort
-		const fallbackPort = savedPort && isPlausiblePortPath(savedPort) ? savedPort : platformDefaultPort
-		const serialPortChoices = filteredPorts.length ? filteredPorts.map((p) => p.path) : [fallbackPort]
+		const serialPortChoices = filteredPorts.length ? filteredPorts.map((p) => p.path) : [savedPort && isPlausiblePortPath(savedPort) ? savedPort : '']
 		return [
 			{ type: 'static-text', id: 'info', width: 12, label: 'DCT VISCA', value: 'Raw VISCA over TCP or serial (RS-485/RS-232). For serial, run Companion on the machine wired to the camera.' },
 			{ type: 'dropdown', id: 'conn', label: 'Connection', width: 4, default: 'tcp', choices: [{ id: 'tcp', label: 'TCP' }, { id: 'serial', label: 'Serial (COM)' }] },
@@ -1268,7 +1272,7 @@ class DctViscaInstance extends InstanceBase {
 				// Ports the probe saw answer a VISCA inquiry get a "(camera
 				// found)" marker; the id stays the bare path.
 				default: '',
-				choices: serialPortChoices.map((p) => ({ id: p, label: this.serialCameras?.[p]?.camera ? `${p} (camera found)` : p })),
+				choices: serialPortChoices.map((p) => ({ id: p, label: this.serialCameras?.[p]?.camera ? `${p} (camera found)` : p || '(no adapters found -- enter port manually)' })),
 				allowCustom: true,
 				isVisible: (c) => c.conn === 'serial',
 			},
