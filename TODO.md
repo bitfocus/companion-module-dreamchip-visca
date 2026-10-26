@@ -10,6 +10,8 @@ Bitfocus module registry):
 - [ ] `README.md` — remove the **Cloning** section (internal Gerrit clone URL and
       the `dct hooks install` workflow).
 - [ ] Remove the **Command coverage** section below (internal firmware roadmap).
+- [ ] `.github/` (workflows + issue templates, copied from upstream) only take
+      effect on GitHub; make sure the `Jenkinsfile*` files are not published.
 
 ## Command coverage (firmware follow-ups)
 

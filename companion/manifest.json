@@ -3,7 +3,7 @@
   "name": "dct-visca",
   "shortname": "VISCA",
   "description": "Control Dream Chip cameras over VISCA",
-  "version": "0.0.1",
+  "version": "0.8.0",
   "license": "MIT",
   "repository": "https://gerrit.office.dreamchip.de/admin/repos/project/provideo/sw/companion-module-dct-visca",
   "bugs": "https://gerrit.office.dreamchip.de/admin/repos/project/provideo/sw/companion-module-dct-visca",

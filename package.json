@@ -1,11 +1,12 @@
 {
   "name": "companion-module-dct-visca",
-  "version": "0.0.1",
+  "version": "0.8.0",
   "type": "module",
   "main": "src/main.js",
   "description": "Control Dream Chip cameras over VISCA",
   "scripts": {
     "test": "node --test",
+    "package": "companion-module-build",
     "test:hardware": "node tools/camera-check.mjs",
     "lint": "eslint .",
     "format:check": "prettier --check src test tools eslint.config.mjs",
