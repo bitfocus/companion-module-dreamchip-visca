@@ -533,12 +533,10 @@ export const COMMANDS = {
 
 	dct_cnr_auto: { name: 'CNR Auto', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x11, 0x00), On: P(0x01, 0x7e, 0x01, 0x11, 0x01) } },
 	dct_cnr_mode: { name: 'CNR Mode', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x10), nibbles: 1 },
-	// A "DPF Enable" control no longer exists in camera firmware (removed
-	// along with a strength-only predecessor in favor of a single
-	// denoise-strength knob, see dct_dpf_strength
-	// below) -- there is nothing left to map On/Off to, so this button/
-	// inquiry is removed rather than kept as permanently-erroring dead code.
-	dct_dpf_strength: { name: 'DPF Strength', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x13), nibbles: 1 },
+	// The former DPF Enable/DPF Strength controls (function 0x13) no longer
+	// exist in camera firmware -- on Marietta the denoise strength is Filter
+	// Denoise below -- so they are removed rather than kept as
+	// permanently-erroring dead code.
 	dct_filter_enable: { name: 'Filter Enable', group: 'System', kind: 'enum', choices: { Off: P(0x01, 0x7e, 0x01, 0x14, 0x00), On: P(0x01, 0x7e, 0x01, 0x14, 0x01) } },
 	// Filter Detail's real range is 0-31 (firmware hard-rejects >=32);
 	// wire stays 2 nibbles (0-255, same as Filter Denoise's real 0-255), but
@@ -546,9 +544,11 @@ export const COMMANDS = {
 	// narrows the Companion-side UI/knob range to what's actually usable,
 	// instead of letting the wire's full 0-255 capacity leak through.
 	dct_filter_detail: { name: 'Filter Detail', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x15), nibbles: 2, max: 31 },
-	// Filter Denoise's real range is 0-255; 1 nibble truncated it,
-	// widened to 2 nibbles to match it exactly.
-	dct_filter_denoise: { name: 'Filter Denoise', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x16), nibbles: 2 },
+	// Filter Denoise's real range is 0-255 on Atom Two; 1 nibble truncated it,
+	// widened to 2 nibbles to match it exactly. Atom Two HDR's firmware only
+	// accepts 0-7 (0 = off), so `modelMax` narrows the Companion-side UI/knob
+	// range per camera model once the model is known (see effectiveMax()).
+	dct_filter_denoise: { name: 'Filter Denoise', group: 'System', kind: 'direct', prefix: P(0x01, 0x7e, 0x01, 0x16), nibbles: 2, modelMax: { 'atom-two-hdr': 7 } },
 
 	// LUT Mode's real settable range is 0-1; a third "fixed" mode
 	// exists in the camera but is explicitly rejected as
@@ -713,7 +713,6 @@ export const INQUIRIES = {
 	dct_slog3_gain: { name: 'S-Log3 Master Gain', varId: 'dct_slog3_gain', payload: P(0x09, 0x7e, 0x01, 0x09), decode: { type: 'value', signed: true }, once: true },
 	dct_cnr_mode: { name: 'CNR Mode', varId: 'dct_cnr_mode', payload: P(0x09, 0x7e, 0x01, 0x10), decode: { type: 'value' }, once: true },
 	dct_cnr_auto: { name: 'CNR Auto', varId: 'dct_cnr_auto', payload: P(0x09, 0x7e, 0x01, 0x11), decode: { type: 'enum', map: ENUM.dct_onoff }, once: true },
-	dct_dpf_strength: { name: 'DPF Strength', varId: 'dct_dpf_strength', payload: P(0x09, 0x7e, 0x01, 0x13), decode: { type: 'value' }, once: true },
 	dct_filter_enable: { name: 'Filter Enable', varId: 'dct_filter_enable', payload: P(0x09, 0x7e, 0x01, 0x14), decode: { type: 'enum', map: ENUM.dct_onoff }, once: true },
 	dct_filter_detail: { name: 'Filter Detail', varId: 'dct_filter_detail', payload: P(0x09, 0x7e, 0x01, 0x15), decode: { type: 'value' }, once: true },
 	dct_filter_denoise: { name: 'Filter Denoise', varId: 'dct_filter_denoise', payload: P(0x09, 0x7e, 0x01, 0x16), decode: { type: 'value' }, once: true },
@@ -778,6 +777,7 @@ export function continuousParams() {
 				signed: !!c.signed,
 				min: c.min ?? wireMin,
 				max: c.max ?? wireMax,
+				modelMax: c.modelMax,
 				step: c.step,
 				logScale: !!c.logScale,
 				stepPercent: c.stepPercent,
@@ -788,6 +788,13 @@ export function continuousParams() {
 				barMax: c.barMax,
 			}
 		})
+}
+
+// A param's upper bound for the given camera model ('atom-two'|'atom-two-hdr'|
+// undefined): the per-model `modelMax` override if one applies, else `max`.
+// Unknown model keeps the unrestricted `max`.
+export function effectiveMax(p, model) {
+	return p.modelMax?.[model] ?? p.max
 }
 
 // Render a value's position within [min,max] as a compact text bar, e.g.

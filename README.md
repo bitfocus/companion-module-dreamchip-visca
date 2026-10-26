@@ -30,7 +30,7 @@ In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
 | **Target IP** / **TCP port** | TCP mode: the camera's IP and VISCA TCP port (default `4000`) |
 | **Serial port** / **Baud** | Serial mode: the COM port (e.g. `COM3` or `/dev/ttyUSB0`) and baud (default `115200`). Run Companion on the machine physically wired to the camera |
 | **Camera address** | VISCA address `1`–`7` (default `1`) |
-| **Poll ms** | Read-back polling interval in ms; `0` = off (send-only), otherwise a **minimum of `2000`** (faster values are automatically raised to 2000). Only the "live" tier is repeated on this interval -- calibration/setup-style values (LUT, filters, CNR/DPF, SDI, gamma, black levels, flare, audio, etc.) are read once per connection instead; use "System: Poll startup values now" to re-sync them on demand |
+| **Poll ms** | Read-back polling interval in ms; `0` = off (send-only), otherwise a **minimum of `2000`** (faster values are automatically raised to 2000). Only the "live" tier is repeated on this interval -- calibration/setup-style values (LUT, filters, CNR, SDI, gamma, black levels, flare, audio, etc.) are read once per connection instead; use "System: Poll startup values now" to re-sync them on demand |
 | **Knob step** | Turn increment for rotary-knob presets on `0`–`255` params (default `4`); `0`–`15` params always step by 1 |
 
 ## What it exposes

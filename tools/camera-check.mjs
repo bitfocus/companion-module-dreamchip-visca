@@ -7,7 +7,7 @@
 // Queries version_inq right after connecting to detect which camera model
 // is attached (mirrors main.js's own model detection) and excludes commands
 // that don't exist on that model (see MODEL_GATED_IDS below) -- otherwise
-// e.g. Gain Mode/CNR (Violetta-only) or Tone Mapping Mode/DPF (Marietta-only)
+// e.g. Gain Mode/CNR (Violetta-only) or Tone Mapping Mode (Marietta-only)
 // show up as spurious ERROR 0x41 failures on the other model.
 //
 // Sends `reset_settings` once at the very start (so the run begins from a
@@ -209,8 +209,8 @@ function parseCameraModel(versionText) {
 }
 
 // Commands that don't exist on one of the two camera product lines (confirmed:
-// dpf_strength/tm_mode genuinely require the Phoenix ISP, i.e. Marietta-only,
-// so both are unusable on Violetta; gain_mode/cnr require the ProVideo ISP,
+// tm_mode genuinely requires the Phoenix ISP, i.e. Marietta-only,
+// so it is unusable on Violetta; filter_enable is Violetta-only; gain_mode/cnr require the ProVideo ISP,
 // i.e. Violetta-only, so both are unusable on Marietta) -- attempting them on
 // the wrong model always fails with VISCA_ERR_NOT_EXECUTABLE (0x41), which is
 // noise, not a real regression, so they're excluded from that model's run.
@@ -221,8 +221,8 @@ function parseCameraModel(versionText) {
 // unrestricted, same fallback main.js uses -- a slow/old-firmware version
 // reply never silently drops test coverage.
 const MODEL_GATED_IDS = {
-	violetta: ['dct_tm_mode', 'dct_tm_mode_preset', 'dct_dpf_strength'],
-	marietta: ['dct_gain_mode', 'dct_cnr_auto', 'dct_cnr_mode'],
+	violetta: ['dct_tm_mode', 'dct_tm_mode_preset'],
+	marietta: ['dct_gain_mode', 'dct_cnr_auto', 'dct_cnr_mode', 'dct_filter_enable'],
 }
 
 // varId derivation for `direct` commands (mirrors continuousParams()' own rule).
@@ -247,6 +247,10 @@ function pickTestValue(min, max) {
 // hard-reject with -EFAULT -- so cam_gamma must run last too, or it silently
 // breaks every LUT/SDI-range test for the rest of the run. Run gamma first,
 // then AEC's cases, then WB's, matching the requested order.
+// main.js keys COMMANDS' per-model overrides (`modelMax`) by its own model names.
+const MAIN_MODEL_KEY = { violetta: 'atom-two', marietta: 'atom-two-hdr' }
+let cameraModel // set once the version inquiry has been read
+
 const DEFERRED_ORDER = ['cam_gamma', 'cam_ae', 'cam_wb']
 
 // --- build the test case list (same enumeration as tools/testplan generation) ---
@@ -340,7 +344,6 @@ const ENUM_VERIFY_MAP = {
 	dct_ggain: 'dct_ggain',
 	dct_gain_mode: 'dct_gain_mode',
 	dct_cnr_auto: 'dct_cnr_auto',
-	dct_dpf_enable: 'dct_dpf_enable',
 	dct_filter_enable: 'dct_filter_enable',
 	dct_sdi_range: 'dct_sdi_range',
 	dct_audio_enable: 'dct_audio_enable',
@@ -390,7 +393,7 @@ async function runRud(id, action) {
 async function runDirect(id) {
 	const c = COMMANDS[id]
 	const p = paramsById[id]
-	const value = pickTestValue(p.min, p.max)
+	const value = pickTestValue(p.min, p.modelMax?.[MAIN_MODEL_KEY[cameraModel]] ?? p.max)
 	const mask = (1 << (4 * c.nibbles)) - 1
 	const res = await setCommand([...c.prefix, ...encodeNibbles(value & mask, c.nibbles)])
 	if (!res.ok) return { pass: false, detail: describeFailure(res) }
@@ -495,6 +498,7 @@ async function main() {
 
 	const versionInq = await inquire('version')
 	const model = versionInq.ok ? parseCameraModel(versionInq.value) : undefined
+	cameraModel = model
 	console.log(model ? `Detected camera model: ${model}` : 'Camera model: unknown (no restrictions applied)')
 
 	const cases = buildCases(model)

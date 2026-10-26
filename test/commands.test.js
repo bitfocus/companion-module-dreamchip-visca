@@ -39,6 +39,7 @@ import {
 	decodeReply,
 	continuousParams,
 	toSigned,
+	effectiveMax,
 } from '../src/commands.js'
 
 const isByte = (b) => Number.isInteger(b) && b >= 0 && b <= 0xff
@@ -877,19 +878,19 @@ test("continuousParams' Gain (direct) entry is logScale with a 4-raw-unit minimu
 
 // --- two-tier polling (main.js pollLiveOnce()/pollStartupOnce()) -----------
 
-test('exactly the 37 calibration/setup-style inquiries are tagged once:true (startup-only tier)', () => {
+test('exactly the 36 calibration/setup-style inquiries are tagged once:true (startup-only tier)', () => {
 	const onceIds = Object.entries(INQUIRIES)
 		.filter(([, q]) => q.once)
 		.map(([id]) => id)
 		.sort()
-	assert.equal(onceIds.length, 37)
+	assert.equal(onceIds.length, 36)
 	assert.deepEqual(
 		onceIds,
 		[
 			'dct_aec_maxgain', 'dct_aec_setpoint', 'dct_aec_speed', 'dct_audio_gain',
 			'dct_auto_save', 'dct_awb_speed', 'dct_black_blue', 'dct_black_green', 'dct_black_master',
 			'dct_black_red', 'dct_cnr_auto', 'dct_cnr_mode', 'dct_color_space',
-			'dct_dpf_strength', 'dct_filter_denoise', 'dct_filter_detail', 'dct_filter_enable',
+			'dct_filter_denoise', 'dct_filter_detail', 'dct_filter_enable',
 			'dct_flare_blue', 'dct_flare_green', 'dct_flare_red', 'dct_gain_mode', 'dct_lut_fast_gamma', 'dct_lut_fixed_mode',
 			'dct_lut_mode', 'dct_lut_preset', 'dct_mcc_opmode', 'dct_osd', 'dct_pq_max_bright',
 			'dct_sdi_black', 'dct_sdi_white', 'dct_slog3_gain', 'dct_tm_mode', 'flicker', 'flip',
@@ -1003,4 +1004,25 @@ test('every knob-backed param with a format() renders a non-empty string for its
 test('cam_ae/cam_wb are still full multi-choice enums (the new toggle only ever targets Auto/Manual)', () => {
 	assert.deepEqual(Object.keys(COMMANDS.cam_ae.choices), ['Auto', 'Manual', 'Shutter Pri'])
 	assert.deepEqual(Object.keys(COMMANDS.cam_wb.choices), ['Auto', 'Indoor', 'Outdoor', 'Manual', 'Trigger'])
+})
+
+// --- Filter Enable / Detail / Denoise ----------------------------------------
+
+test('DPF Strength is gone from COMMANDS and INQUIRIES (function 0x13 removed from firmware)', () => {
+	assert.equal(COMMANDS.dct_dpf_strength, undefined)
+	assert.equal(INQUIRIES.dct_dpf_strength, undefined)
+})
+
+test('Filter Denoise is 0-255 by default and narrowed to 0-7 on Atom Two HDR only', () => {
+	const p = continuousParams().find((x) => x.id === 'dct_filter_denoise')
+	assert.equal(p.max, 255)
+	assert.equal(effectiveMax(p, 'atom-two'), 255)
+	assert.equal(effectiveMax(p, undefined), 255)
+	assert.equal(effectiveMax(p, 'atom-two-hdr'), 7)
+})
+
+test('Filter Detail stays 0-31 on every model', () => {
+	const p = continuousParams().find((x) => x.id === 'dct_filter_detail')
+	assert.equal(p.max, 31)
+	for (const m of ['atom-two', 'atom-two-hdr', undefined]) assert.equal(effectiveMax(p, m), 31)
 })

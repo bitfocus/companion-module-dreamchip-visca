@@ -181,15 +181,17 @@ export const PROVIDEO_NAMES = {
 	},
 	dct_cnr_mode: { cmd: 'cnr_mode', scaled: false },
 	dct_cnr_auto: { cmd: 'cnr_auto', scaled: false },
-	dct_dpf_enable: { cmd: 'dpf_enable', scaled: false },
-	dct_dpf_strength: { cmd: 'dpf_strength', scaled: false },
 	dct_filter_enable: { cmd: 'filter_enable', scaled: false },
 	dct_filter_detail: {
 		cmd: 'filter_detail',
 		scaled: true,
 		note: 'real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring',
 	},
-	dct_filter_denoise: { cmd: 'filter_denoise', scaled: false },
+	dct_filter_denoise: {
+		cmd: 'filter_denoise',
+		scaled: false,
+		note: 'real range is 0-255 on Violetta, 0-7 on Marietta (firmware dpf_denoise; 0 = off)',
+	},
 	dct_color_space: { cmd: 'color_space', scaled: true, note: 'real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP' },
 	dct_pq_max_bright: {
 		cmd: 'pq_max_brightness',

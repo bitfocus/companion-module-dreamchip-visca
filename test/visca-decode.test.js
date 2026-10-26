@@ -23,11 +23,11 @@ test('parseLines ignores a CSV header row with incidental hex-looking letter pai
 	assert.deepEqual(lines, [{ dir: 'TX', bytes: [0x81, 0x09, 0x00, 0x02, 0xff] }])
 })
 
-test('DCT-ext direct-set frame (dpf_strength) translates 1:1, no scaling', () => {
-	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x13, ...encodeNibbles(9, 1)])))
+test('DCT-ext direct-set frame (filter_denoise) translates 1:1, no scaling', () => {
+	const entries = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x16, ...encodeNibbles(9, 2)])))
 	assert.equal(entries.length, 1)
-	assert.match(entries[0].companion, /DPF Strength = 9/)
-	assert.equal(entries[0].provideo, 'dpf_strength 9')
+	assert.match(entries[0].companion, /Filter Denoise = 9/)
+	assert.equal(entries[0].provideo, 'filter_denoise 9')
 })
 
 test('DCT-ext inquiry + error reply (real session example: Color Space, not executable)', () => {
@@ -40,10 +40,10 @@ test('DCT-ext inquiry + error reply (real session example: Color Space, not exec
 })
 
 test('DCT-ext inquiry + successful reply decodes the value and names the ProVideo command', () => {
-	const lines = parseLines(`${tx([0x09, 0x7e, 0x01, 0x13])}\n${rx([0x50, ...encodeNibbles(7, 1)])}`)
+	const lines = parseLines(`${tx([0x09, 0x7e, 0x01, 0x16])}\n${rx([0x50, ...encodeNibbles(7, 2)])}`)
 	const entries = decodeDump(lines)
-	assert.match(entries[1].companion, /DPF Strength = 7/)
-	assert.equal(entries[1].provideo, 'dpf_strength')
+	assert.match(entries[1].companion, /Filter Denoise = 7/)
+	assert.equal(entries[1].provideo, 'filter_denoise')
 })
 
 test('standard-category direct-set (Gain) reports the raw value with a scaling caveat', () => {

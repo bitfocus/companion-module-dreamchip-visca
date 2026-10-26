@@ -66,11 +66,10 @@ necessarily via the recurring poll.
 | CNR Auto: Off | cnr_auto 0 | [ Y] | |
 | CNR Auto: On | cnr_auto 1 | [ Y] | dont see a change|
 | CNR Mode | cnr_mode <value> | [ Y] | |
-| DPF Strength | dpf_strength <value>  // "DPF Enable" removed from Companion: dpf_enable/dpf_strength were both deleted from firmware in favor of a single dpf_denoise 0-7 knob (0=off); the VISCA mapping for function 0x13 was fixed to follow the rename, but the Companion command is still named/wired as dpf_strength pending that rename here too | [ N] | |
-| Filter Enable: Off | filter_enable 0 | [ Y] | |
-| Filter Enable: On | filter_enable 1 | [ Y] | |
+| Filter Enable: Off | filter_enable 0  // Violetta only | [ Y] | |
+| Filter Enable: On | filter_enable 1  // Violetta only | [ Y] | |
 | Filter Detail | filter_detail <raw=<value>>  // real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring | [ Y] | |
-| Filter Denoise | filter_denoise <value> | [ Y] | |
+| Filter Denoise | filter_denoise <value>  // real range 0-255 on Violetta, 0-7 on Marietta (0=off) | [ Y] | |
 | LUT Mode | lut_mode <raw=<value>>  // real settable range is 0-1 (Interpolate/Fast Gamma, lut_drv.h); do_lut_mode rejects LUT_MODE_FIXED=2 with -EINVAL ("used only internally") | [ Y] | |
 | LUT Fixed Mode | lut_fixed_mode <value> | [ Y] | |
 | LUT Preset | lut_preset <value> | [ Y] | |
@@ -205,10 +204,9 @@ necessarily via the recurring poll.
 | S-Log3 Master Gain | real range is signed -6..12 dB (system_settings.h); do_slog3_master_gain hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled | [ ] | |
 | CNR Mode | cnr_mode | [ ] | |
 | CNR Auto | cnr_auto | [ ] | |
-| DPF Strength | dpf_strength  // removed from firmware (see Companion Actions section above); this inquiry is kept in Companion but will always error until renamed to dpf_denoise | [ ] | |
-| Filter Enable | filter_enable | [ ] | |
+| Filter Enable | filter_enable  // Violetta only | [ ] | |
 | Filter Detail | real range is 0-31 (ISP_FLT_MAX_DETAIL_LVL); firmware clamps raw values above 31 to 31 instead of erroring | [ ] | |
-| Filter Denoise | filter_denoise | [ ] | |
+| Filter Denoise | filter_denoise  // 0-255 on Violetta, 0-7 on Marietta | [ ] | |
 | Color Space | real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP | [ ] | |
 | PQ Max Brightness | real range is 100-10000 cd/m2 (do_pq_max_brightness); raw is 0-4095, linearly scaled, not a placeholder | [ ] | |
 | LUT Mode | real settable range is 0-1 (Interpolate/Fast Gamma, lut_drv.h); do_lut_mode rejects LUT_MODE_FIXED=2 with -EINVAL ("used only internally") | [ ] | |

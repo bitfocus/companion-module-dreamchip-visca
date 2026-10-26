@@ -1,5 +1,5 @@
 import { InstanceBase, InstanceStatus, Regex, TCPHelper, runEntrypoint, combineRgb } from '@companion-module/base'
-import { COMMANDS, INQUIRIES, ENUM, SYSTEM, SYSTEM_NAMES, GAIN_ISO, SHUTTER_SPEEDS, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams, progressBar } from './commands.js'
+import { COMMANDS, INQUIRIES, ENUM, SYSTEM, SYSTEM_NAMES, GAIN_ISO, SHUTTER_SPEEDS, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams, effectiveMax, progressBar } from './commands.js'
 import { KNOB_RING_PNG } from './images.js'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
@@ -116,17 +116,17 @@ function parseCameraModel(versionText) {
 }
 
 // Commands/presets that don't apply to one of the two camera product lines
-// (confirmed on real hardware: DPF Strength and Tone Mapping Mode only exist
-// on Atom Two HDR, so both are unusable -- and thus hidden -- on Atom Two;
-// Filter Enable/Filter Denoise/Gain Mode are hidden on Atom Two HDR per product
-// decision). Applied in setupActions()/setupPresets() and the poll filters
+// (confirmed on real hardware: Tone Mapping Mode only exists on Atom Two HDR,
+// so it is unusable -- and thus hidden -- on Atom Two; Filter Enable/Gain Mode
+// are hidden on Atom Two HDR per product decision; Filter Denoise exists on
+// both, with a narrower range on Atom Two HDR, see COMMANDS.modelMax). Applied in setupActions()/setupPresets() and the poll filters
 // once the camera's model is known (see this.cameraModel, set from
 // applyInquiryReply()'s version-reply hook) -- unknown model means
 // unrestricted, so a camera whose firmware predates this model-id scheme (or
 // a failed/slow version poll) never has controls incorrectly hidden.
 const MODEL_GATED_IDS = {
-	'atom-two': ['dct_dpf_strength', 'dct_tm_mode', 'dct_tm_mode_preset'],
-	'atom-two-hdr': ['dct_filter_enable', 'dct_filter_denoise', 'dct_gain_mode'],
+	'atom-two': ['dct_tm_mode', 'dct_tm_mode_preset'],
+	'atom-two-hdr': ['dct_filter_enable', 'dct_gain_mode'],
 }
 
 // Knobs whose real command already has a proper RUD "Reset" (server-side
@@ -709,7 +709,7 @@ class DctViscaInstance extends InstanceBase {
 		} else {
 			raw = cur + delta
 		}
-		const next = Math.max(p.min, Math.min(p.max, raw))
+		const next = Math.max(p.min, Math.min(effectiveMax(p, this.cameraModel), raw))
 		const c = COMMANDS[p.cmd]
 		this.send([...c.prefix, ...encodeNibbles(next, c.nibbles)])
 		this.setKnobValue(p.varId, next)
@@ -749,7 +749,7 @@ class DctViscaInstance extends InstanceBase {
 				}
 			} else if (c.kind === 'direct') {
 				const bits = 4 * c.nibbles
-				const max = c.max ?? (c.signed ? (1 << (bits - 1)) - 1 : (1 << bits) - 1)
+				const max = c.modelMax?.[this.cameraModel] ?? c.max ?? (c.signed ? (1 << (bits - 1)) - 1 : (1 << bits) - 1)
 				const min = c.min ?? (c.signed ? -(1 << (bits - 1)) : 0)
 				const mask = (1 << bits) - 1
 				a.options = [{ type: 'number', id: 'value', label: `Value (${min}-${max})`, default: min, min, max }]
@@ -963,7 +963,7 @@ class DctViscaInstance extends InstanceBase {
 		// Rotary-encoder (Stream Deck+) knobs: turn = adjust +/- step, press = sync.
 		for (const p of this.params) {
 			if (gatedIds.includes(p.id)) continue
-			const step = p.step ?? (p.max <= 15 ? 1 : this.knobStep())
+			const step = p.step ?? (effectiveMax(p, this.cameraModel) <= 15 ? 1 : this.knobStep())
 			presets[`knob_${p.id}`] = {
 				type: 'button',
 				category: `${p.group}`,
@@ -1066,7 +1066,7 @@ class DctViscaInstance extends InstanceBase {
 					// of falling through to progressBar()'s own "not finite" dashes.
 					let barVal = p.barValue ? p.barValue(n) : n
 					const barMin = p.barValue ? p.barMin : p.min
-					const barMax = p.barValue ? p.barMax : p.max
+					const barMax = p.barValue ? p.barMax : effectiveMax(p, this.cameraModel)
 					if (p.barValue && !Number.isFinite(barVal)) barVal = barMin
 					const bar = progressBar(barVal, barMin, barMax)
 					return { text: `${p.name}\\n${text}\\n${bar}`, size: 'auto' }
