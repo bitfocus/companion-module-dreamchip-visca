@@ -8,7 +8,7 @@
 // Bare hex lines (no "TX "/"RX " prefix) are also accepted; direction is then
 // inferred from the frame's type/kind byte.
 import { readFileSync } from 'node:fs'
-import { COMMANDS, INQUIRIES, RUD, SYSTEM, SYSTEM_NAMES, TERMINATOR, decodeNibbles, decodeReply, toSigned } from '../commands.js'
+import { COMMANDS, INQUIRIES, RUD, SYSTEM, SYSTEM_NAMES, TERMINATOR, decodeNibbles, decodeReply, toSigned } from '../src/commands.js'
 import { PROVIDEO_NAMES } from './provideo-names.mjs'
 
 const ERROR_CODES = {

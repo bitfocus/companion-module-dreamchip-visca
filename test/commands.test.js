@@ -39,7 +39,7 @@ import {
 	decodeReply,
 	continuousParams,
 	toSigned,
-} from '../commands.js'
+} from '../src/commands.js'
 
 const isByte = (b) => Number.isInteger(b) && b >= 0 && b <= 0xff
 const KINDS = new Set(['enum', 'rud', 'direct', 'fixed', 'video', 'iso', 'shutter'])

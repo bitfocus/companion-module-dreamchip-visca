@@ -3,21 +3,24 @@
 Bitfocus Companion v4 module controlling Dream Chip cameras over VISCA (raw
 bytes over TCP or serial). No build step, no TypeScript, no linter — plain
 ESM (`"type": "module"`) JS that Companion loads directly via
-`companion/manifest.json` → `main.js`. Requires Node 22 (`engines: ^22`).
+`companion/manifest.json` → `src/main.js`. Requires Node 22 (`engines: ^22`).
 
 ## Structure
 
-- `commands.js` — the single source of truth: `COMMANDS`/`INQUIRIES` wire
+All shipped module code lives in `src/` (Companion loads `src/main.js`;
+`tools/` and `test/` import from there):
+
+- `src/commands.js` — the single source of truth: `COMMANDS`/`INQUIRIES` wire
   tables plus codec (`buildFrame`, `decodeReply`, nibble encoding) and unit
-  conversions. Actions, presets, variables and feedbacks in `main.js` are all
-  generated from these tables; add features by editing tables, not by hand-
-  wiring in main.js.
-- `main.js` — Companion entrypoint (`InstanceBase` + `runEntrypoint`):
+  conversions. Actions, presets, variables and feedbacks in `src/main.js` are
+  all generated from these tables; add features by editing tables, not by
+  hand-wiring in main.js.
+- `src/main.js` — Companion entrypoint (`InstanceBase` + `runEntrypoint`):
   transport, two-tier poller (inquiries tagged `once: true` are read once per
   connection; the rest repeat on the Poll ms interval, floor 2000), camera
   model detection from the version inquiry (some commands exist only on
   Violetta or Marietta).
-- `images.js` — knob ring background drawn by a from-scratch PNG encoder
+- `src/images.js` — knob ring background drawn by a from-scratch PNG encoder
   (no image deps).
 - `tools/` — standalone scripts, no Companion needed:
   - `smoke.mjs [host] [port]` — raw-TCP transceive against a camera/simulator
@@ -46,7 +49,7 @@ ESM (`"type": "module"`) JS that Companion loads directly via
 
 ## Conventions / gotchas
 
-- The top-level `*.js` files (`main.js`, `commands.js`, `images.js`) are the
+- The `src/*.js` files (`main.js`, `commands.js`, `images.js`) are the
   public artifact: their comments must not name internal firmware repos,
   source files, handler/function names or internal constants (keep the
   behavioral facts instead, phrased as "the camera firmware ..."). The

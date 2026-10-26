@@ -18,7 +18,7 @@
     "type": "node22",
     "api": "nodejs-ipc",
     "apiVersion": "1.11.3",
-    "entrypoint": "../main.js",
+    "entrypoint": "../src/main.js",
     "universal": true
   },
   "manufacturer": "Dream Chip Technologies",

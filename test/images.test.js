@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import zlib from 'node:zlib'
 
-import { encodePng, KNOB_RING_PNG } from '../images.js'
+import { encodePng, KNOB_RING_PNG } from '../src/images.js'
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 

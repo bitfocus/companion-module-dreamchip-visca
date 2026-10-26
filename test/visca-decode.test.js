@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildFrame, encodeNibbles, GAIN_ISO, SHUTTER_SPEEDS } from '../commands.js'
+import { buildFrame, encodeNibbles, GAIN_ISO, SHUTTER_SPEEDS } from '../src/commands.js'
 import { decodeDump, parseLines, translate } from '../tools/visca-decode.mjs'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()

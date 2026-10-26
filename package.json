@@ -2,7 +2,7 @@
   "name": "companion-module-dct-visca",
   "version": "0.0.1",
   "type": "module",
-  "main": "main.js",
+  "main": "src/main.js",
   "description": "Control Dream Chip cameras over VISCA",
   "scripts": {
     "test": "node --test",

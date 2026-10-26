@@ -29,7 +29,7 @@
 //   node tools/camera-check.mjs --group Exposure   (filter by COMMANDS group)
 //   node tools/camera-check.mjs --only gain        (filter by id/name substring)
 
-import { COMMANDS, INQUIRIES, RUD, TERMINATOR, encodeNibbles, buildFrame, decodeReply, continuousParams, GAIN_ISO, SHUTTER_SPEEDS } from '../commands.js'
+import { COMMANDS, INQUIRIES, RUD, TERMINATOR, encodeNibbles, buildFrame, decodeReply, continuousParams, GAIN_ISO, SHUTTER_SPEEDS } from '../src/commands.js'
 
 const PORT = process.env.VISCA_TEST_PORT
 const BAUD = Number(process.env.VISCA_TEST_BAUD) || 115200

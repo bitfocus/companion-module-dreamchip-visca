@@ -6,7 +6,7 @@
 //   node tools/smoke.mjs [host] [port]
 //
 import net from 'node:net'
-import { INQUIRIES, buildFrame, decodeReply, TERMINATOR } from '../commands.js'
+import { INQUIRIES, buildFrame, decodeReply, TERMINATOR } from '../src/commands.js'
 
 const host = process.argv[2] || '127.0.0.1'
 const port = Number(process.argv[3] || 4000)
