@@ -155,11 +155,8 @@ const KNOB_PRESS_SET_VALUE = {
 	cam_contrast_direct: 128,
 	dct_wb_temp: 6500, // common daylight white-balance reference, per user request
 	dct_audio_gain: 256, // per user request
-	// LUT Fast Gamma reset target: standard gamma 2.2 (per user request). The
-	// wire grid (1100 + pq*8) can't hit 2.200 exactly -- pq 137 lands on 2.196
-	// and 138 on 2.204, an exact tie, resolved by rounding up (same
-	// convention as the ISO display); both read back identically to what's
-	// written, so the knob never snaps.
+	// LUT Fast Gamma reset target: standard gamma 2.2. The wire grid (1100 + pq*8)
+	// can't hit 2.200 exactly -- pq 137 lands on 2.196 and 138 on 2.204
 	dct_lut_fast_gamma: 138,
 }
 
