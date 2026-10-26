@@ -132,7 +132,17 @@ test('DCT command payloads use the 01 7E 01 SS prefix consistently', () => {
 		for (const p of payloadsOf(c)) {
 			if (p[1] !== 0x7e) continue
 			assert.equal(p[0], 0x01, `${id}: DCT command byte`)
-			assert.equal(p[2], 0x01, `${id}: DCT sub-namespace`)
+			if (p[2] === 0x04) {
+				// The camera firmware's second DCT sub-namespace, reserved for
+				// exactly one command: Tally Green at SS 0x1A (it can't live in
+				// 01, where sub-opcode 0x1A belongs to dct_aec_maxgain). Pin it
+				// as the sole exception rather than dropping the check, so any
+				// future 7E-namespace drift still trips here.
+				assert.equal(id, 'dct_tally_green', `${id}: 7E 04 sub-namespace is reserved for dct_tally_green`)
+				assert.equal(p[3], 0x1a, `${id}: 7E 04 carries only SS 0x1a`)
+			} else {
+				assert.equal(p[2], 0x01, `${id}: DCT sub-namespace`)
+			}
 			assert.ok(isByte(p[3]), `${id}: DCT sub-opcode`)
 			ss.add(p[3])
 		}

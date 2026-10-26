@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Bitfocus Companion v4 module controlling Dream Chip cameras over VISCA (raw
-bytes over TCP or serial). No build step, no TypeScript, no linter — plain
+bytes over TCP or serial). No build step, no TypeScript — plain
 ESM (`"type": "module"`) JS that Companion loads directly via
 `companion/manifest.json` → `src/main.js`. Requires Node 22 (`engines: ^22`).
 
@@ -60,7 +60,10 @@ All shipped module code lives in `src/` (Companion loads `src/main.js`;
   Check those tests before "adding" a missing command.
 - UI value ranges are often narrower than the wire range (firmware
   hard-rejects); follow the narrowed ranges and their tests.
-- Vendor extensions use the DCT `01 7E 01 SS` prefix; the wire value is raw
+- Vendor extensions use the DCT `01 7E 01 SS` prefix (one firmware-blessed
+  exception: Tally Green is `01 7E 04 1A` — second sub-namespace, because
+  SS 0x1A in `01` belongs to AEC Max Gain; pinned in the prefix test);
+  the wire value is raw
   VISCA units, with natural-unit display conversions (ISO, µs, dB, K) applied
   only in the UI/knob layer.
 - Poll ms `0` = send-only mode; in that mode buttons confirm state via an
@@ -76,13 +79,13 @@ All shipped module code lives in `src/` (Companion loads `src/main.js`;
   `UnknownWarning`, and serial (unlike TCP) has its own 2s reconnect timer
   (`scheduleSerialReconnect`). Don't "simplify" these back to
   updateStatus(Ok) on socket open.
-- Package manager is yarn classic (v1, pinned via `packageManager`): `yarn.lock`
-  is the only lockfile — never regenerate `package-lock.json`/`pnpm-lock.yaml`.
-  `.yarnrc` sets `ignore-engines` because yarn v1 hard-fails the `engines: ^22`
-  requirement on Node 18 dev boxes (the ^22 floor is real for Companion's
-  bundled runtime — keep it). Yarn v1 builds native deps
-  (`@serialport/bindings-cpp`) automatically; that approval dance is
-  pnpm-only and gone.
+- Package manager is yarn 4 (pinned via `packageManager`, matching
+  `@companion-module/tools`; use corepack): `yarn.lock` is the only lockfile —
+  never regenerate `package-lock.json`/`pnpm-lock.yaml`. `.yarnrc.yml` sets
+  `nodeLinker: node-modules` (Companion needs a plain `node_modules`, not
+  PnP). Yarn 4 doesn't enforce the root `engines: ^22` (the floor is real for
+  Companion's bundled runtime — keep it) and builds native deps
+  (`@serialport/bindings-cpp`) automatically; the pnpm approval dance is gone.
 
 ## Workflow
 
@@ -90,5 +93,16 @@ All shipped module code lives in `src/` (Companion loads `src/main.js`;
   the Gerrit `commit-msg` hook installed (`dct hooks install` per README).
 - Commit style: short lowercase subject, Conventional-ish prefixes
   (`feat(scope):`, `fix(knob):`).
+- CI: `Jenkinsfile.health` (new patchsets) and `Jenkinsfile` (merged
+  changes), same stages as in provideo-gui, run
+  `yarn install --immutable`, `node --check src/*.js`, `yarn eslint` (checkstyle
+  report -> Warnings plugin; eslint errors and prettier formatting warnings only
+  mark the build UNSTABLE) and `yarn test`
+  (JUnit published) inside the provideo apptainer via `tool-apptainer/apptainer-provideo/run.sh`.
+  Node 22 + yarn 4.5.3 + libudev-dev live in that image
+  (`apptainer/apptainer-provideo/container.def`); rebuild with `./build.sh -u`
+  and keep the yarn version in sync with `packageManager` in `package.json`.
+  Hardware tests are not run in CI. The Jenkinsfiles are internal: keep them out of
+  anything published upstream.
 - Before publishing anywhere public, work through the checklist in `TODO.md`
   (internal Gerrit URLs/sections must be scrubbed first).

@@ -6,18 +6,26 @@
   "description": "Control Dream Chip cameras over VISCA",
   "scripts": {
     "test": "node --test",
-    "test:hardware": "node tools/camera-check.mjs"
+    "test:hardware": "node tools/camera-check.mjs",
+    "lint": "eslint .",
+    "format:check": "prettier --check src test tools",
+    "format": "prettier --write src test tools"
   },
   "license": "MIT",
-  "packageManager": "yarn@1.22.22",
+  "packageManager": "yarn@4.5.3",
   "dependencies": {
     "@companion-module/base": "~1.11.0",
     "serialport": "^12.0.0"
   },
   "devDependencies": {
-    "@companion-module/tools": ">=2.1.0 <2.4.0"
+    "@companion-module/tools": ">=2.1.0 <2.4.0",
+    "eslint": "^9",
+    "eslint-formatter-checkstyle": "^9.0.1",
+    "globals": "^17.13.0",
+    "prettier": "^3"
   },
   "engines": {
     "node": "^22"
-  }
+  },
+  "prettier": "@companion-module/tools/.prettierrc.json"
 }

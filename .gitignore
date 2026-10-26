@@ -2,3 +2,7 @@ node_modules/
 pkg/
 *.tgz
 .DS_Store
+.yarn/
+eslint-report.xml
+test-results.xml
+.yarn-cache/

@@ -96,7 +96,7 @@ git -C project/provideo/sw/companion-module-dct-visca dct hooks install
 ## Development
 
 ```sh
-yarn install    # yarn classic (v1); with corepack-active Node 22: corepack enable && yarn install
+yarn install    # yarn 4; needs corepack: corepack enable && yarn install
 ```
 
 In the Companion launcher, set the **Developer modules path** to the folder
