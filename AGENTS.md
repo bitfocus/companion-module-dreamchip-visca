@@ -33,17 +33,17 @@ All shipped module code lives in `src/` (Companion loads `src/main.js`;
 
 ## Tests
 
-- `npm test` → `node --test` (discovers `test/*.test.js`; pure unit tests, no
+- `yarn test` → `node --test` (discovers `test/*.test.js`; pure unit tests, no
   network or hardware). Single file: `node --test test/commands.test.js`;
   single case: `node --test --test-name-pattern='<name>' test/commands.test.js`.
 - Unit tests assert table invariants with hard-coded counts and explicit
   exclusion lists (e.g. "exactly 37 `once:true` inquiries", "cam_power is not
   exposed"). Any change to `COMMANDS`/`INQUIRIES` likely requires updating
-  those assertions plus `TESTPLAN.md` (hand-maintained, mirrors
-  `COMMANDS`/`INQUIRIES` + `tools/provideo-names.mjs`) and possibly
-  `tools/provideo-names.mjs`.
-- Hardware test (not part of `npm test`, needs a real serial camera):
-  `VISCA_TEST_PORT=/dev/ttyUSB0 npm run test:hardware`. It resets camera
+   those assertions plus `TESTPLAN.md` (hand-maintained, mirrors
+   `COMMANDS`/`INQUIRIES` + `tools/provideo-names.mjs`) and possibly
+   `tools/provideo-names.mjs`.
+- Hardware test (not part of `yarn test`, needs a real serial camera):
+  `VISCA_TEST_PORT=/dev/ttyUSB0 yarn test:hardware`. It resets camera
   settings before and after the run; destructive commands are skipped unless
   `--include-destructive`. Filters: `--group <Group>`, `--only <substr>`.
 
@@ -76,10 +76,13 @@ All shipped module code lives in `src/` (Companion loads `src/main.js`;
   `UnknownWarning`, and serial (unlike TCP) has its own 2s reconnect timer
   (`scheduleSerialReconnect`). Don't "simplify" these back to
   updateStatus(Ok) on socket open.
-- pnpm users: `@serialport/bindings-cpp` native build must be approved
-  (`allowBuilds` in `pnpm-workspace.yaml`). `package-lock.json` and
-  `pnpm-lock.yaml` both exist — update whichever lockfile matches your
-  manager, or both.
+- Package manager is yarn classic (v1, pinned via `packageManager`): `yarn.lock`
+  is the only lockfile — never regenerate `package-lock.json`/`pnpm-lock.yaml`.
+  `.yarnrc` sets `ignore-engines` because yarn v1 hard-fails the `engines: ^22`
+  requirement on Node 18 dev boxes (the ^22 floor is real for Companion's
+  bundled runtime — keep it). Yarn v1 builds native deps
+  (`@serialport/bindings-cpp`) automatically; that approval dance is
+  pnpm-only and gone.
 
 ## Workflow
 

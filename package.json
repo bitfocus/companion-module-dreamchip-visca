@@ -9,6 +9,7 @@
     "test:hardware": "node tools/camera-check.mjs"
   },
   "license": "MIT",
+  "packageManager": "yarn@1.22.22",
   "dependencies": {
     "@companion-module/base": "~1.11.0",
     "serialport": "^12.0.0"
