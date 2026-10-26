@@ -192,7 +192,7 @@ test('DCT-ext direct-set (Flare Blue) reports the raw value with a read-modify-w
 	assert.match(entries[0].provideo, /read-modify-write of all 3 args/)
 })
 
-test('DCT-ext enum command (SDI Range) maps 0->Legal, 1->Full, matching do_sdi_range\'s own help text', () => {
+test("DCT-ext enum command (SDI Range) maps 0->Legal, 1->Full, matching do_sdi_range's own help text", () => {
 	const legal = decodeDump(parseLines(tx([0x01, 0x7e, 0x01, 0x30, 0x00])))
 	assert.match(legal[0].companion, /SDI Range = Legal/)
 	assert.equal(legal[0].provideo, 'sdi_range 0')

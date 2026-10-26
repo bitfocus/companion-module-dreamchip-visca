@@ -27,12 +27,22 @@
 export const PROVIDEO_NAMES = {
 	// --- category 0x00/0x04 standard VISCA (visca_map_system.c) -------------
 	if_clear: { cmd: null, note: 'protocol IF_Clear ack only, not a ProVideo command' },
-	cam_system: { cmd: null, note: 'video-mode dialect is conditional/interop-specific (CONFIG_VISCA_CMD_LENS_STUB); see visca_map_system.c, not a flat mapping' },
+	cam_system: {
+		cmd: null,
+		note: 'video-mode dialect is conditional/interop-specific (CONFIG_VISCA_CMD_LENS_STUB); see visca_map_system.c, not a flat mapping',
+	},
 
 	// --- category 0x04 exposure (visca_map_exposure.c) ----------------------
 	cam_ae: { choices: { Auto: 'aec 1', Manual: 'aec 0', 'Shutter Pri': 'aec 1' } },
-	ae_mode: { cmd: 'aec', scaled: false, note: 'readback: aec!=0 -> Full Auto, else Manual (Shutter Pri is not distinguishable on readback)' },
-	cam_gain: { cmd: 'cam_gain', rud: { reset: 'cam_gain 1000', up: 'read-modify-write (+109)', down: 'read-modify-write (-109)' } },
+	ae_mode: {
+		cmd: 'aec',
+		scaled: false,
+		note: 'readback: aec!=0 -> Full Auto, else Manual (Shutter Pri is not distinguishable on readback)',
+	},
+	cam_gain: {
+		cmd: 'cam_gain',
+		rud: { reset: 'cam_gain 1000', up: 'read-modify-write (+109)', down: 'read-modify-write (-109)' },
+	},
 	cam_gain_direct: {
 		cmd: 'cam_gain',
 		scaled: true,
@@ -43,7 +53,10 @@ export const PROVIDEO_NAMES = {
 		scaled: true,
 		note: 'real range is 1000-45715 (1x/0dB/140 ISO min; max from the current AUTO gain-mode range); raw is 0-4095, linearly scaled, not a placeholder',
 	},
-	cam_shutter: { cmd: 'cam_exposure', rud: { reset: 'cam_exposure 1000', up: 'read-modify-write (+93us)', down: 'read-modify-write (-93us)' } },
+	cam_shutter: {
+		cmd: 'cam_exposure',
+		rud: { reset: 'cam_exposure 1000', up: 'read-modify-write (+93us)', down: 'read-modify-write (-93us)' },
+	},
 	cam_shutter_direct: {
 		cmd: 'cam_exposure',
 		scaled: true,
@@ -60,8 +73,11 @@ export const PROVIDEO_NAMES = {
 	// different ProVideo command — keyed by the enum choice label.
 	cam_wb: {
 		choices: {
-			Auto: 'awb 1', Indoor: 'wb_preset 1', Outdoor: 'wb_preset 2',
-			Manual: 'awb 0', Trigger: 'wb',
+			Auto: 'awb 1',
+			Indoor: 'wb_preset 1',
+			Outdoor: 'wb_preset 2',
+			Manual: 'awb 0',
+			Trigger: 'wb',
 		},
 	},
 	wb_mode: { cmd: 'awb', scaled: false, note: 'readback only distinguishes Auto/Manual, not preset/trigger detail' },
@@ -70,18 +86,44 @@ export const PROVIDEO_NAMES = {
 	// preset-index passthrough (no Kelvin matching) with no inquiry
 	// counterpart of its own. wb_temp (below) is the distinct command that
 	// DOES set/read a real settable Kelvin value.
-	color_temp_direct: { cmd: 'wb_preset', scaled: false, note: 'raw preset index passthrough, not a Kelvin value -- see COMMANDS.color_temp_direct' },
+	color_temp_direct: {
+		cmd: 'wb_preset',
+		scaled: false,
+		note: 'raw preset index passthrough, not a Kelvin value -- see COMMANDS.color_temp_direct',
+	},
 	// wb_temp: settable Kelvin whitepoint. The bare-dump form returns
 	// "<cur> <min> <max>"; the current/min/max inquiries select one field via
 	// a selector byte, so all three resolve to the same ProVideo command.
-	dct_wb_temp: { cmd: 'wb_temp', scaled: false, note: 'UI range hardcoded 2200-10000; firmware rejects out-of-range per live per-sensor min/max' },
-	dct_wb_temp_min: { cmd: 'wb_temp', scaled: false, note: 'min field of "wb_temp" dump (live per-sensor calibrated range); read via the bare wb_temp/dump with a selector, not its own ProVideo command' },
-	dct_wb_temp_max: { cmd: 'wb_temp', scaled: false, note: 'max field of "wb_temp" dump (live per-sensor calibrated range); read via the bare wb_temp/dump with a selector, not its own ProVideo command' },
-	dct_wb_temp_measure: { cmd: 'wb_temp_measure', scaled: false, note: 'measured scene color temperature [K] (lpf_cct_run); inquiry-only' },
-	cam_rgain: { cmd: 'gain_red', rud: { reset: 'gain_red 512', up: 'read-modify-write (+step)', down: 'read-modify-write (-step)' } },
+	dct_wb_temp: {
+		cmd: 'wb_temp',
+		scaled: false,
+		note: 'UI range hardcoded 2200-10000; firmware rejects out-of-range per live per-sensor min/max',
+	},
+	dct_wb_temp_min: {
+		cmd: 'wb_temp',
+		scaled: false,
+		note: 'min field of "wb_temp" dump (live per-sensor calibrated range); read via the bare wb_temp/dump with a selector, not its own ProVideo command',
+	},
+	dct_wb_temp_max: {
+		cmd: 'wb_temp',
+		scaled: false,
+		note: 'max field of "wb_temp" dump (live per-sensor calibrated range); read via the bare wb_temp/dump with a selector, not its own ProVideo command',
+	},
+	dct_wb_temp_measure: {
+		cmd: 'wb_temp_measure',
+		scaled: false,
+		note: 'measured scene color temperature [K] (lpf_cct_run); inquiry-only',
+	},
+	cam_rgain: {
+		cmd: 'gain_red',
+		rud: { reset: 'gain_red 512', up: 'read-modify-write (+step)', down: 'read-modify-write (-step)' },
+	},
 	cam_rgain_direct: { cmd: 'gain_red', scaled: false },
 	rgain: { cmd: 'gain_red', scaled: false },
-	cam_bgain: { cmd: 'gain_blue', rud: { reset: 'gain_blue 512', up: 'read-modify-write (+step)', down: 'read-modify-write (-step)' } },
+	cam_bgain: {
+		cmd: 'gain_blue',
+		rud: { reset: 'gain_blue 512', up: 'read-modify-write (+step)', down: 'read-modify-write (-step)' },
+	},
 	cam_bgain_direct: { cmd: 'gain_blue', scaled: false },
 	bgain: { cmd: 'gain_blue', scaled: false },
 
@@ -96,7 +138,10 @@ export const PROVIDEO_NAMES = {
 	flip: { cmd: 'flip', scaled: false },
 	// cam_bright's Direct form shares its RUD's function byte (0x0D) --
 	// disambiguated by packet length, not a separate function code.
-	cam_bright: { cmd: 'post_bright', rud: { reset: 'post_bright 0', up: 'read-modify-write (+5)', down: 'read-modify-write (-5)' } },
+	cam_bright: {
+		cmd: 'post_bright',
+		rud: { reset: 'post_bright 0', up: 'read-modify-write (+5)', down: 'read-modify-write (-5)' },
+	},
 	cam_bright_direct: { cmd: 'post_bright', scaled: false },
 	bright: { cmd: 'post_bright', scaled: false },
 	// cam_gamma is a plain 4-value enum passthrough to log_mode. Value 0 isn't
@@ -115,7 +160,11 @@ export const PROVIDEO_NAMES = {
 			'60Hz': 'read-modify-write of aec (taf=8333)',
 		},
 	},
-	flicker: { cmd: 'aec', scaled: false, note: "reads aec's taf field: 8333 -> 60Hz, anything else (including the un-set-able Off) normalizes to 50Hz" },
+	flicker: {
+		cmd: 'aec',
+		scaled: false,
+		note: "reads aec's taf field: 8333 -> 60Hz, anything else (including the un-set-able Off) normalizes to 50Hz",
+	},
 
 	cam_settings_save: { cmd: 'save_settings', scaled: false },
 	cam_settings_reset: { cmd: 'reset_settings', scaled: false },
@@ -123,8 +172,14 @@ export const PROVIDEO_NAMES = {
 	// accepts a settable Kelvin value, only stat_cct exists and it's
 	// read-only AWB telemetry). INQUIRY has no data source: the currently
 	// active preset index is never exposed via any text command.
-	color_temp: { cmd: null, note: "no way to read back the current wb_preset index; SET works, see COMMANDS.color_temp_direct" },
-	video_mode: { cmd: null, note: 'video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping' },
+	color_temp: {
+		cmd: null,
+		note: 'no way to read back the current wb_preset index; SET works, see COMMANDS.color_temp_direct',
+	},
+	video_mode: {
+		cmd: null,
+		note: 'video-mode dialect is conditional/interop-specific; see visca_map_system.c, not a flat mapping',
+	},
 	version: { cmd: null, note: 'static identity reply, not a ProVideo command' },
 
 	// --- category 0x7E Dream Chip vendor extensions (visca_map_dct_ext.c) ---
@@ -133,7 +188,10 @@ export const PROVIDEO_NAMES = {
 	// exception: it scales like the standard-category gains.
 	// green's reset target is 256 (unity/1.0x, the AWB reference channel),
 	// unlike red/blue's 512 (2x) -- confirmed on real hardware.
-	dct_ggain: { cmd: 'gain_green', choices: { Reset: 'gain_green 256', Up: 'read-modify-write (+step)', Down: 'read-modify-write (-step)' } },
+	dct_ggain: {
+		cmd: 'gain_green',
+		choices: { Reset: 'gain_green 256', Up: 'read-modify-write (+step)', Down: 'read-modify-write (-step)' },
+	},
 	dct_ggain_direct: { cmd: 'gain_green', scaled: false },
 	dct_gain_mode: { cmd: 'gain_mode', scaled: false },
 	dct_black_master: { cmd: 'black_master', scaled: false },
@@ -173,7 +231,11 @@ export const PROVIDEO_NAMES = {
 		scaled: true,
 		note: "sets flare's positional arg 3 (blue), real range 0-65535, via read-modify-write of all 3 args; raw is 0-4095, firmware multiplies it by 16",
 	},
-	dct_awb_speed: { cmd: 'awb_speed', scaled: true, note: 'real range is 0-2; do_awb_speed hard-rejects raw values above 2 with -EINVAL (unlike filter_detail, which clamps instead of erroring)' },
+	dct_awb_speed: {
+		cmd: 'awb_speed',
+		scaled: true,
+		note: 'real range is 0-2; do_awb_speed hard-rejects raw values above 2 with -EINVAL (unlike filter_detail, which clamps instead of erroring)',
+	},
 	dct_slog3_gain: {
 		cmd: 'slog3_master_gain',
 		scaled: true,
@@ -192,20 +254,40 @@ export const PROVIDEO_NAMES = {
 		scaled: false,
 		note: 'real range is 0-255 on Violetta, 0-7 on Marietta (firmware dpf_denoise; 0 = off)',
 	},
-	dct_color_space: { cmd: 'color_space', scaled: true, note: 'real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP' },
+	dct_color_space: {
+		cmd: 'color_space',
+		scaled: true,
+		note: 'real range is 0-2 (Rec.709/Rec.2020/S-Gamut3.Cine, isp_drv.h); do_color_space hard-rejects outside that with -EOPNOTSUPP',
+	},
 	dct_pq_max_bright: {
 		cmd: 'pq_max_brightness',
 		scaled: true,
 		note: 'real range is 100-10000 cd/m2 (do_pq_max_brightness); raw is 0-4095, linearly scaled, not a placeholder',
 	},
 	dct_mcc_opmode: { cmd: 'mcc_opmode', scaled: false },
-	dct_lut_mode: { cmd: 'lut_mode', scaled: true, note: 'real settable range is 0-1 (Interpolate/Fast Gamma, lut_drv.h); do_lut_mode rejects LUT_MODE_FIXED=2 with -EINVAL ("used only internally")' },
+	dct_lut_mode: {
+		cmd: 'lut_mode',
+		scaled: true,
+		note: 'real settable range is 0-1 (Interpolate/Fast Gamma, lut_drv.h); do_lut_mode rejects LUT_MODE_FIXED=2 with -EINVAL ("used only internally")',
+	},
 	dct_lut_fixed_mode: { cmd: 'lut_fixed_mode', scaled: false },
 	dct_lut_preset: { cmd: 'lut_preset', scaled: false },
-	dct_lut_fast_gamma: { cmd: 'lut_fast_gamma', scaled: true, note: 'real range is 1100-3000 (gamma x 1000, i.e. 1.1-3.0); raw pq 0-237 maps to 1100+pq*8 (0.008 steps), pq 238-255 clamp to 3000 but read back as 237; inquiry floors (gamma-1100)/8' },
+	dct_lut_fast_gamma: {
+		cmd: 'lut_fast_gamma',
+		scaled: true,
+		note: 'real range is 1100-3000 (gamma x 1000, i.e. 1.1-3.0); raw pq 0-237 maps to 1100+pq*8 (0.008 steps), pq 238-255 clamp to 3000 but read back as 237; inquiry floors (gamma-1100)/8',
+	},
 	dct_sdi_range: { cmd: 'sdi_range', scaled: false },
-	dct_sdi_black: { cmd: 'sdi_black', scaled: true, note: 'real range is signed -60..60; do_sdi_black hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled' },
-	dct_sdi_white: { cmd: 'sdi_white', scaled: true, note: 'real range is signed -80..79; do_sdi_white hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled' },
+	dct_sdi_black: {
+		cmd: 'sdi_black',
+		scaled: true,
+		note: 'real range is signed -60..60; do_sdi_black hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled',
+	},
+	dct_sdi_white: {
+		cmd: 'sdi_white',
+		scaled: true,
+		note: 'real range is signed -80..79; do_sdi_white hard-rejects outside that with -EINVAL; raw is signed -128..127, clamped, not scaled',
+	},
 	dct_osd: { cmd: 'osd', scaled: false },
 	dct_audio_enable: { cmd: 'audio_enable', scaled: false },
 	dct_audio_gain: {

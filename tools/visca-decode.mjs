@@ -8,7 +8,17 @@
 // Bare hex lines (no "TX "/"RX " prefix) are also accepted; direction is then
 // inferred from the frame's type/kind byte.
 import { readFileSync } from 'node:fs'
-import { COMMANDS, INQUIRIES, RUD, SYSTEM, SYSTEM_NAMES, TERMINATOR, decodeNibbles, decodeReply, toSigned } from '../src/commands.js'
+import {
+	COMMANDS,
+	INQUIRIES,
+	RUD,
+	SYSTEM,
+	SYSTEM_NAMES,
+	TERMINATOR,
+	decodeNibbles,
+	decodeReply,
+	toSigned,
+} from '../src/commands.js'
 import { PROVIDEO_NAMES } from './provideo-names.mjs'
 
 const ERROR_CODES = {
@@ -55,7 +65,11 @@ export function matchCommand(payload) {
 			const action = Object.keys(RUD).find((k) => RUD[k] === payload[3])
 			if (action) return { id, kind: 'rud', action }
 		}
-		if (c.kind === 'direct' && payload.length === c.prefix.length + c.nibbles && eq(payload.slice(0, c.prefix.length), c.prefix)) {
+		if (
+			c.kind === 'direct' &&
+			payload.length === c.prefix.length + c.nibbles &&
+			eq(payload.slice(0, c.prefix.length), c.prefix)
+		) {
 			const raw = decodeNibbles(payload.slice(c.prefix.length))
 			return { id, kind: 'direct', value: c.signed ? toSigned(raw, c.nibbles) : raw }
 		}
@@ -104,7 +118,9 @@ export function translate(m) {
 	}
 	if (m.kind === 'direct') {
 		if (!p.cmd) return p.note ?? '(no ProVideo mapping known)'
-		return p.scaled ? `${p.cmd} <raw=${m.value}>  // ${p.note ?? 'firmware applies its own scaling (TODO stage 8) before this reaches the sensor'}` : `${p.cmd} ${m.value}`
+		return p.scaled
+			? `${p.cmd} <raw=${m.value}>  // ${p.note ?? 'firmware applies its own scaling (TODO stage 8) before this reaches the sensor'}`
+			: `${p.cmd} ${m.value}`
 	}
 	if (m.kind === 'fixed' || m.kind === 'video') return p.note ?? (p.cmd ? p.cmd : '(no ProVideo mapping known)')
 	return p.note ?? (p.cmd ? `${p.cmd}${p.scaled ? ' <raw value>' : ''}` : '(no ProVideo mapping known)')
@@ -128,7 +144,12 @@ export function decodeDump(lines) {
 			if (type === 0x09) {
 				const m = matchInquiry(payload)
 				pending = m ? { ...m, kind: 'inquiry' } : null
-				out.push({ dir: 'TX', raw: bytes, companion: describeCompanion(pending), provideo: pending ? undefined : '(no ProVideo mapping known)' })
+				out.push({
+					dir: 'TX',
+					raw: bytes,
+					companion: describeCompanion(pending),
+					provideo: pending ? undefined : '(no ProVideo mapping known)',
+				})
 			} else {
 				const m = matchCommand(payload)
 				pending = null

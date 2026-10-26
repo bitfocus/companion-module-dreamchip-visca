@@ -1,5 +1,21 @@
 import { InstanceBase, InstanceStatus, Regex, TCPHelper, runEntrypoint, combineRgb } from '@companion-module/base'
-import { COMMANDS, INQUIRIES, ENUM, SYSTEM, SYSTEM_NAMES, GAIN_ISO, SHUTTER_SPEEDS, RUD, TERMINATOR, encodeNibbles, decodeReply, buildFrame, continuousParams, effectiveMax, progressBar } from './commands.js'
+import {
+	COMMANDS,
+	INQUIRIES,
+	ENUM,
+	SYSTEM,
+	SYSTEM_NAMES,
+	GAIN_ISO,
+	SHUTTER_SPEEDS,
+	RUD,
+	TERMINATOR,
+	encodeNibbles,
+	decodeReply,
+	buildFrame,
+	continuousParams,
+	effectiveMax,
+	progressBar,
+} from './commands.js'
 import { KNOB_RING_PNG } from './images.js'
 
 const hex = (b) => Buffer.from(b).toString('hex').replace(/(..)/g, '$1 ').trim()
@@ -62,7 +78,13 @@ const PRESET_BGCOLOR_OVERRIDES = {
 // don't line up 1:1 with COMMANDS (e.g. cam_gain -> INQUIRIES.gain), same
 // irregularity continuousParams()/directVarId() already work around for the
 // "direct" counterparts.
-const RUD_INQUIRY_ID = { cam_gain: 'gain', cam_shutter: 'shutter', cam_rgain: 'rgain', cam_bgain: 'bgain', cam_bright: 'bright' }
+const RUD_INQUIRY_ID = {
+	cam_gain: 'gain',
+	cam_shutter: 'shutter',
+	cam_rgain: 'rgain',
+	cam_bgain: 'bgain',
+	cam_bright: 'bright',
+}
 
 // enum COMMANDS ids whose plain per-choice buttons (not just their dedicated
 // toggle action) should also confirmIfNotPolling() after sending -- these
@@ -104,7 +126,14 @@ const PRESET_KNOB_TARGET = { dct_tm_mode_preset: 'dct_tm_mode', dct_color_space_
 // affected mode right after any of these varIds
 // is deliberately written (see setKnobValue() and applyInquiryReply()'s
 // resyncKnob branch below).
-const MODE_SIDE_EFFECT_INQUIRY = { gain: 'ae_mode', shutter: 'ae_mode', rgain: 'wb_mode', bgain: 'wb_mode', dct_ggain: 'wb_mode', dct_wb_temp: 'wb_mode' }
+const MODE_SIDE_EFFECT_INQUIRY = {
+	gain: 'ae_mode',
+	shutter: 'ae_mode',
+	rgain: 'wb_mode',
+	bgain: 'wb_mode',
+	dct_ggain: 'wb_mode',
+	dct_wb_temp: 'wb_mode',
+}
 
 // The version inquiry's model-id field (commands.js's 'version'
 // decode formats it as "...model=0x0000..."/"...model=0x0001..."). Camera
@@ -621,7 +650,8 @@ class DctViscaInstance extends InstanceBase {
 		// resyncKnob-gated for the same reason as the knob resync above: only
 		// a deliberate confirm-read, never a routine background poll of
 		// gain/shutter/rgain/bgain/dct_ggain themselves.
-		if (opts.resyncKnob && MODE_SIDE_EFFECT_INQUIRY[q.varId]) this.confirmIfNotPolling(MODE_SIDE_EFFECT_INQUIRY[q.varId])
+		if (opts.resyncKnob && MODE_SIDE_EFFECT_INQUIRY[q.varId])
+			this.confirmIfNotPolling(MODE_SIDE_EFFECT_INQUIRY[q.varId])
 		if (q.varId === 'ae_mode') this.checkFeedbacks('ae_mode_is', 'cam_ae_display')
 		if (q.varId === 'wb_mode') this.checkFeedbacks('wb_mode_is', 'cam_wb_display')
 		if (q.varId === 'dct_audio_enable') this.checkFeedbacks('dct_audio_enable_is', 'dct_audio_enable_display')
@@ -643,7 +673,9 @@ class DctViscaInstance extends InstanceBase {
 	inquireOnce(qId, opts) {
 		const q = INQUIRIES[qId]
 		if (!q) return
-		this.enqueue(buildFrame(this.config?.address || 1, q.payload), (reply, kind) => this.applyInquiryReply(q, reply, kind, opts))
+		this.enqueue(buildFrame(this.config?.address || 1, q.payload), (reply, kind) =>
+			this.applyInquiryReply(q, reply, kind, opts),
+		)
 	}
 
 	// An optimistic local write (e.g. a toggle action) assumes the SET
@@ -724,7 +756,15 @@ class DctViscaInstance extends InstanceBase {
 			const a = { name: `${c.group}: ${c.name}`, options: [] }
 			if (c.kind === 'enum') {
 				const ids = Object.keys(c.choices)
-				a.options = [{ type: 'dropdown', id: 'choice', label: c.name, default: ids[0], choices: ids.map((x) => ({ id: x, label: x })) }]
+				a.options = [
+					{
+						type: 'dropdown',
+						id: 'choice',
+						label: c.name,
+						default: ids[0],
+						choices: ids.map((x) => ({ id: x, label: x })),
+					},
+				]
 				a.callback = (ev) => {
 					this.send(c.choices[ev.options.choice])
 					if (CONFIRM_POLL_ENUM_IDS.has(id)) this.confirmIfNotPolling(CONFIRM_POLL_INQUIRY_ID[id] ?? id)
@@ -735,7 +775,15 @@ class DctViscaInstance extends InstanceBase {
 				}
 			} else if (c.kind === 'rud') {
 				const rudChoices = c.rudChoices ?? Object.keys(RUD)
-				a.options = [{ type: 'dropdown', id: 'choice', label: 'Action', default: rudChoices[0], choices: rudChoices.map((x) => ({ id: x, label: x })) }]
+				a.options = [
+					{
+						type: 'dropdown',
+						id: 'choice',
+						label: 'Action',
+						default: rudChoices[0],
+						choices: rudChoices.map((x) => ({ id: x, label: x })),
+					},
+				]
 				a.callback = (ev) => {
 					this.send([0x01, 0x04, c.func, RUD[ev.options.choice]])
 					// Reset/Up/Down all change the real value server-side without
@@ -769,13 +817,29 @@ class DctViscaInstance extends InstanceBase {
 				}
 			} else if (c.kind === 'video') {
 				const modes = Object.keys(SYSTEM)
-				a.options = [{ type: 'dropdown', id: 'mode', label: 'Video mode', default: modes[0], choices: modes.map((m) => ({ id: m, label: SYSTEM_NAMES[m] ?? `Mode ${m}` })) }]
+				a.options = [
+					{
+						type: 'dropdown',
+						id: 'mode',
+						label: 'Video mode',
+						default: modes[0],
+						choices: modes.map((m) => ({ id: m, label: SYSTEM_NAMES[m] ?? `Mode ${m}` })),
+					},
+				]
 				a.callback = (ev) => {
 					const [b2, b3] = SYSTEM[ev.options.mode]
 					this.send([0x01, 0x04, 0x24, 0x00, 0x00, b2, b3])
 				}
 			} else if (c.kind === 'iso') {
-				a.options = [{ type: 'dropdown', id: 'iso', label: 'ISO', default: GAIN_ISO[0].iso, choices: GAIN_ISO.map((g) => ({ id: g.iso, label: `ISO ${g.iso}` })) }]
+				a.options = [
+					{
+						type: 'dropdown',
+						id: 'iso',
+						label: 'ISO',
+						default: GAIN_ISO[0].iso,
+						choices: GAIN_ISO.map((g) => ({ id: g.iso, label: `ISO ${g.iso}` })),
+					},
+				]
 				a.callback = (ev) => {
 					const raw = GAIN_ISO.find((g) => g.iso === Number(ev.options.iso))?.raw ?? 0
 					this.send([...c.prefix, ...encodeNibbles(raw, c.nibbles)])
@@ -784,7 +848,15 @@ class DctViscaInstance extends InstanceBase {
 					this.setKnobValue('gain', raw)
 				}
 			} else if (c.kind === 'shutter') {
-				a.options = [{ type: 'dropdown', id: 'n', label: 'Shutter speed', default: SHUTTER_SPEEDS[0].n, choices: SHUTTER_SPEEDS.map((s) => ({ id: s.n, label: `1/${s.n}` })) }]
+				a.options = [
+					{
+						type: 'dropdown',
+						id: 'n',
+						label: 'Shutter speed',
+						default: SHUTTER_SPEEDS[0].n,
+						choices: SHUTTER_SPEEDS.map((s) => ({ id: s.n, label: `1/${s.n}` })),
+					},
+				]
 				a.callback = (ev) => {
 					const raw = SHUTTER_SPEEDS.find((s) => s.n === Number(ev.options.n))?.raw ?? 0
 					this.send([...c.prefix, ...encodeNibbles(raw, c.nibbles)])
@@ -798,13 +870,23 @@ class DctViscaInstance extends InstanceBase {
 		actions['adjust'] = {
 			name: 'Knob: Adjust value (relative)',
 			options: [
-				{ type: 'dropdown', id: 'param', label: 'Parameter', default: params[0]?.id, choices: params.map((p) => ({ id: p.id, label: `${p.group}: ${p.name}` })) },
+				{
+					type: 'dropdown',
+					id: 'param',
+					label: 'Parameter',
+					default: params[0]?.id,
+					choices: params.map((p) => ({ id: p.id, label: `${p.group}: ${p.name}` })),
+				},
 				{ type: 'number', id: 'step', label: 'Step (may be negative)', default: this.knobStep(), min: -255, max: 255 },
 			],
 			callback: (ev) => this.adjustParam(ev.options.param, Number(ev.options.step)),
 		}
 		actions['poll_now'] = { name: 'System: Poll inquiries now', options: [], callback: () => this.pollOnce() }
-		actions['poll_startup_now'] = { name: 'System: Poll startup values now', options: [], callback: () => this.pollStartupOnce() }
+		actions['poll_startup_now'] = {
+			name: 'System: Poll startup values now',
+			options: [],
+			callback: () => this.pollStartupOnce(),
+		}
 		// Knob-press "set to a fixed value" actions (see KNOB_PRESS_SET_VALUE) --
 		// a plain direct SET to a value we chose ourselves, so (unlike a RUD
 		// reset) there's nothing to confirm via inquiry: write state/knob
@@ -952,7 +1034,9 @@ class DctViscaInstance extends InstanceBase {
 				}
 			} else if (c.kind === 'iso') {
 				for (const g of GAIN_ISO) {
-					presets[`${id}_${g.iso}`] = btn(c.group, `${c.name}: ISO ${g.iso}`, `${c.name}\\nISO ${g.iso}`, id, { iso: g.iso })
+					presets[`${id}_${g.iso}`] = btn(c.group, `${c.name}: ISO ${g.iso}`, `${c.name}\\nISO ${g.iso}`, id, {
+						iso: g.iso,
+					})
 				}
 			} else if (c.kind === 'shutter') {
 				for (const s of SHUTTER_SPEEDS) {
@@ -973,9 +1057,11 @@ class DctViscaInstance extends InstanceBase {
 				steps: [
 					{
 						down: [
-						KNOB_PRESS_DOWN[p.id] ??
-							(p.id in KNOB_PRESS_SET_VALUE ? { actionId: `${p.id}_knob_reset`, options: {} } : { actionId: 'poll_now', options: {} }),
-					],
+							KNOB_PRESS_DOWN[p.id] ??
+								(p.id in KNOB_PRESS_SET_VALUE
+									? { actionId: `${p.id}_knob_reset`, options: {} }
+									: { actionId: 'poll_now', options: {} }),
+						],
 						up: [],
 						rotate_right: [{ actionId: 'adjust', options: { param: p.id, step } }],
 						rotate_left: [{ actionId: 'adjust', options: { param: p.id, step: -step } }],
@@ -984,18 +1070,28 @@ class DctViscaInstance extends InstanceBase {
 				feedbacks: [{ feedbackId: 'knob_value', options: { param: p.id } }],
 			}
 		}
-		presets['wb_kelvin_measure'] = btn('White Balance', 'WB Kelvin Measure', 'WB Measure\\n--', 'dct_wb_temp_measure_now', {}, [
-			{ feedbackId: 'wb_measure_display', options: {} },
-		])
+		presets['wb_kelvin_measure'] = btn(
+			'White Balance',
+			'WB Kelvin Measure',
+			'WB Measure\\n--',
+			'dct_wb_temp_measure_now',
+			{},
+			[{ feedbackId: 'wb_measure_display', options: {} }],
+		)
 		presets['audio_enable_toggle'] = btn('Audio', 'Audio: Toggle On/Off', 'Audio\\n--', 'dct_audio_enable_toggle', {}, [
 			{ feedbackId: 'dct_audio_enable_display', options: {} },
 		])
 		presets['sdi_range_toggle'] = btn('System', 'SDI: Toggle Legal/Full', 'SDI\\n--', 'dct_sdi_range_toggle', {}, [
 			{ feedbackId: 'dct_sdi_range_display', options: {} },
 		])
-		presets['timecode_hold_toggle'] = btn('System', 'Timecode: Toggle Run/Hold', 'TC\\n--', 'dct_timecode_hold_toggle', {}, [
-			{ feedbackId: 'dct_timecode_hold_display', options: {} },
-		])
+		presets['timecode_hold_toggle'] = btn(
+			'System',
+			'Timecode: Toggle Run/Hold',
+			'TC\\n--',
+			'dct_timecode_hold_toggle',
+			{},
+			[{ feedbackId: 'dct_timecode_hold_display', options: {} }],
+		)
 		presets['tally_cycle'] = btn('System', 'Tally: Cycle Off/Red/Green/Yellow', 'Tally\\n--', 'dct_tally_cycle', {}, [
 			{ feedbackId: 'dct_tally_display', options: {} },
 		])
@@ -1021,7 +1117,15 @@ class DctViscaInstance extends InstanceBase {
 			type: 'boolean',
 			name,
 			defaultStyle: { bgcolor: GREEN, color: WHITE },
-			options: [{ type: 'dropdown', id: 'mode', label: 'Mode', default: Object.values(mapObj)[0], choices: Object.values(mapObj).map((v) => ({ id: v, label: v })) }],
+			options: [
+				{
+					type: 'dropdown',
+					id: 'mode',
+					label: 'Mode',
+					default: Object.values(mapObj)[0],
+					choices: Object.values(mapObj).map((v) => ({ id: v, label: v })),
+				},
+			],
 			callback: (fb) => this.state[varId] === fb.options.mode,
 		})
 		this.setFeedbackDefinitions({
@@ -1040,7 +1144,13 @@ class DctViscaInstance extends InstanceBase {
 				type: 'advanced',
 				name: 'Knob: show current value',
 				options: [
-					{ type: 'dropdown', id: 'param', label: 'Parameter', default: this.params[0]?.id, choices: this.params.map((p) => ({ id: p.id, label: `${p.group}: ${p.name}` })) },
+					{
+						type: 'dropdown',
+						id: 'param',
+						label: 'Parameter',
+						default: this.params[0]?.id,
+						choices: this.params.map((p) => ({ id: p.id, label: `${p.group}: ${p.name}` })),
+					},
 				],
 				callback: (fb) => {
 					const p = this.paramById?.[fb.options.param]
@@ -1087,7 +1197,12 @@ class DctViscaInstance extends InstanceBase {
 				options: [],
 				callback: () => {
 					const on = this.state.dct_audio_enable === 'On'
-					return { text: `Audio\\n${on ? 'ON' : 'OFF'}`, size: 'auto', bgcolor: on ? LIGHT_CYAN : DARK_CYAN, color: WHITE }
+					return {
+						text: `Audio\\n${on ? 'ON' : 'OFF'}`,
+						size: 'auto',
+						bgcolor: on ? LIGHT_CYAN : DARK_CYAN,
+						color: WHITE,
+					}
 				},
 			},
 			dct_sdi_range_display: {
@@ -1096,7 +1211,12 @@ class DctViscaInstance extends InstanceBase {
 				options: [],
 				callback: () => {
 					const full = this.state.dct_sdi_range === 'Full'
-					return { text: `SDI\\n${full ? 'FULL' : 'LEGAL'}`, size: 'auto', bgcolor: full ? LIGHT_BLUE : BLUE, color: WHITE }
+					return {
+						text: `SDI\\n${full ? 'FULL' : 'LEGAL'}`,
+						size: 'auto',
+						bgcolor: full ? LIGHT_BLUE : BLUE,
+						color: WHITE,
+					}
 				},
 			},
 			dct_tally_display: {
@@ -1116,7 +1236,12 @@ class DctViscaInstance extends InstanceBase {
 				options: [],
 				callback: () => {
 					const auto = this.state.ae_mode !== 'Manual'
-					return { text: `AE\\n${auto ? 'AUTO' : 'MANUAL'}`, size: 'auto', bgcolor: auto ? GREEN : DIM_RED, color: WHITE }
+					return {
+						text: `AE\\n${auto ? 'AUTO' : 'MANUAL'}`,
+						size: 'auto',
+						bgcolor: auto ? GREEN : DIM_RED,
+						color: WHITE,
+					}
 				},
 			},
 			cam_wb_display: {
@@ -1125,7 +1250,12 @@ class DctViscaInstance extends InstanceBase {
 				options: [],
 				callback: () => {
 					const auto = this.state.wb_mode !== 'Manual'
-					return { text: `WB\\n${auto ? 'AUTO' : 'MANUAL'}`, size: 'auto', bgcolor: auto ? GREEN : DIM_RED, color: WHITE }
+					return {
+						text: `WB\\n${auto ? 'AUTO' : 'MANUAL'}`,
+						size: 'auto',
+						bgcolor: auto ? GREEN : DIM_RED,
+						color: WHITE,
+					}
 				},
 			},
 			dct_timecode_hold_display: {
@@ -1134,7 +1264,12 @@ class DctViscaInstance extends InstanceBase {
 				options: [],
 				callback: () => {
 					const on = this.state.dct_timecode_hold === 'Run'
-					return { text: `TC\\n${on ? 'RUN' : 'HOLD'}`, size: 'auto', bgcolor: on ? LIGHT_GRAY : DARK_GRAY, color: WHITE }
+					return {
+						text: `TC\\n${on ? 'RUN' : 'HOLD'}`,
+						size: 'auto',
+						bgcolor: on ? LIGHT_GRAY : DARK_GRAY,
+						color: WHITE,
+					}
 				},
 			},
 		})
@@ -1192,7 +1327,11 @@ class DctViscaInstance extends InstanceBase {
 	// succeed at all (NO_POLL_INQUIRY_IDS), regardless of the `once` tier.
 	pollOnce() {
 		const gatedIds = MODEL_GATED_IDS[this.cameraModel] ?? []
-		this.pollBatch(Object.entries(INQUIRIES).filter(([id]) => !NO_POLL_INQUIRY_IDS.has(id) && !gatedIds.includes(id)).map(([, q]) => q))
+		this.pollBatch(
+			Object.entries(INQUIRIES)
+				.filter(([id]) => !NO_POLL_INQUIRY_IDS.has(id) && !gatedIds.includes(id))
+				.map(([, q]) => q),
+		)
 	}
 
 	// The recurring background cycle (startPolling()'s setInterval). Skips
@@ -1202,7 +1341,11 @@ class DctViscaInstance extends InstanceBase {
 	// keeps every cycle shorter than a full pollOnce() would be.
 	pollLiveOnce() {
 		const gatedIds = MODEL_GATED_IDS[this.cameraModel] ?? []
-		this.pollBatch(Object.entries(INQUIRIES).filter(([id, q]) => !NO_POLL_INQUIRY_IDS.has(id) && !q.once && !gatedIds.includes(id)).map(([, q]) => q))
+		this.pollBatch(
+			Object.entries(INQUIRIES)
+				.filter(([id, q]) => !NO_POLL_INQUIRY_IDS.has(id) && !q.once && !gatedIds.includes(id))
+				.map(([, q]) => q),
+		)
 	}
 
 	// Fired once per successful (re)connection (see initSerial()/initTCP())
@@ -1236,7 +1379,9 @@ class DctViscaInstance extends InstanceBase {
 			void this.scanAndProbeSerialPorts().catch(() => {})
 		}
 		const filterAdapters = this.config?.serialFilterAdapters !== false
-		const filteredPorts = (this.availableSerialPorts ?? []).filter((p) => !filterAdapters || this.isSerialAdapterPort(p))
+		const filteredPorts = (this.availableSerialPorts ?? []).filter(
+			(p) => !filterAdapters || this.isSerialAdapterPort(p),
+		)
 		// When the scan finds no ports at all, fall back to the last saved one
 		// (only if it looks like a path on THIS platform -- otherwise a
 		// connection created (or last saved) on Windows shows a stray "COM3"
@@ -1245,18 +1390,55 @@ class DctViscaInstance extends InstanceBase {
 		// modern Windows assigns COM numbers dynamically per device (anything
 		// 1-255), so a "default port" hint like "COM3" would be a misleading
 		// guess rather than a helpful one.
-		const isPlausiblePortPath = (path) => (process.platform === 'win32' ? /^COM\d+$/i.test(path) : path.startsWith('/dev/'))
+		const isPlausiblePortPath = (path) =>
+			process.platform === 'win32' ? /^COM\d+$/i.test(path) : path.startsWith('/dev/')
 		const savedPort = this.config?.serialPort
-		const serialPortChoices = filteredPorts.length ? filteredPorts.map((p) => p.path) : [savedPort && isPlausiblePortPath(savedPort) ? savedPort : '']
+		const serialPortChoices = filteredPorts.length
+			? filteredPorts.map((p) => p.path)
+			: [savedPort && isPlausiblePortPath(savedPort) ? savedPort : '']
 		return [
-			{ type: 'static-text', id: 'info', width: 12, label: 'DCT VISCA', value: 'Raw VISCA over TCP or serial (RS-485/RS-232). For serial, run Companion on the machine wired to the camera.' },
-			{ type: 'dropdown', id: 'conn', label: 'Connection', width: 4, default: 'tcp', choices: [{ id: 'tcp', label: 'TCP' }, { id: 'serial', label: 'Serial (COM)' }] },
+			{
+				type: 'static-text',
+				id: 'info',
+				width: 12,
+				label: 'DCT VISCA',
+				value:
+					'Raw VISCA over TCP or serial (RS-485/RS-232). For serial, run Companion on the machine wired to the camera.',
+			},
+			{
+				type: 'dropdown',
+				id: 'conn',
+				label: 'Connection',
+				width: 4,
+				default: 'tcp',
+				choices: [
+					{ id: 'tcp', label: 'TCP' },
+					{ id: 'serial', label: 'Serial (COM)' },
+				],
+			},
 			// No pre-filled host on a fresh instance (empty until the user picks
 			// one -- initSerial/initTCP then report BadConfig until it's set);
 			// whatever was entered on the first save is remembered in the config
 			// itself, which the editor shows over this default on every reopen.
-			{ type: 'textinput', id: 'host', label: 'Target IP', width: 5, default: '', regex: Regex.IP, isVisible: (c) => c.conn !== 'serial' },
-			{ type: 'number', id: 'port', label: 'TCP port', width: 3, default: 4000, min: 1, max: 65535, isVisible: (c) => c.conn !== 'serial' },
+			{
+				type: 'textinput',
+				id: 'host',
+				label: 'Target IP',
+				width: 5,
+				default: '',
+				regex: Regex.IP,
+				isVisible: (c) => c.conn !== 'serial',
+			},
+			{
+				type: 'number',
+				id: 'port',
+				label: 'TCP port',
+				width: 3,
+				default: 4000,
+				min: 1,
+				max: 65535,
+				isVisible: (c) => c.conn !== 'serial',
+			},
 			{
 				type: 'dropdown',
 				id: 'serialPort',
@@ -1269,7 +1451,12 @@ class DctViscaInstance extends InstanceBase {
 				// Ports the probe saw answer a VISCA inquiry get a "(camera
 				// found)" marker; the id stays the bare path.
 				default: '',
-				choices: serialPortChoices.map((p) => ({ id: p, label: this.serialCameras?.[p]?.camera ? `${p} (camera found)` : p || '(no adapters found -- enter port manually)' })),
+				choices: serialPortChoices.map((p) => ({
+					id: p,
+					label: this.serialCameras?.[p]?.camera
+						? `${p} (camera found)`
+						: p || '(no adapters found -- enter port manually)',
+				})),
 				allowCustom: true,
 				isVisible: (c) => c.conn === 'serial',
 			},
@@ -1281,9 +1468,28 @@ class DctViscaInstance extends InstanceBase {
 				default: true,
 				isVisible: (c) => c.conn === 'serial',
 			},
-			{ type: 'dropdown', id: 'baud', label: 'Baudrate', width: 3, default: 115200, choices: [{ id: 115200, label: '115200' }, { id: 57600, label: '57600' }], isVisible: (c) => c.conn === 'serial' },
+			{
+				type: 'dropdown',
+				id: 'baud',
+				label: 'Baudrate',
+				width: 3,
+				default: 115200,
+				choices: [
+					{ id: 115200, label: '115200' },
+					{ id: 57600, label: '57600' },
+				],
+				isVisible: (c) => c.conn === 'serial',
+			},
 			{ type: 'number', id: 'address', label: 'Camera address (1-7)', width: 2, default: 1, min: 1, max: 7 },
-			{ type: 'number', id: 'pollInterval', label: 'Poll ms (0=off, min 2000)', width: 2, default: 0, min: 0, max: 60000 },
+			{
+				type: 'number',
+				id: 'pollInterval',
+				label: 'Poll ms (0=off, min 2000)',
+				width: 2,
+				default: 0,
+				min: 0,
+				max: 60000,
+			},
 			{ type: 'number', id: 'knobStep', label: 'Knob step (1-255 params)', width: 3, default: 4, min: 1, max: 128 },
 		]
 	}

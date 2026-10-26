@@ -8,8 +8,8 @@
     "test": "node --test",
     "test:hardware": "node tools/camera-check.mjs",
     "lint": "eslint .",
-    "format:check": "prettier --check src test tools",
-    "format": "prettier --write src test tools"
+    "format:check": "prettier --check src test tools eslint.config.mjs",
+    "format": "prettier --write src test tools eslint.config.mjs"
   },
   "license": "MIT",
   "packageManager": "yarn@4.5.3",

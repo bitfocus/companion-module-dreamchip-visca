@@ -48,13 +48,7 @@ const DECODES = new Set(['enum', 'value', 'version', 'system'])
 
 // return every raw payload a command can emit (for structural checks)
 const payloadsOf = (c) =>
-	c.kind === 'enum'
-		? Object.values(c.choices)
-		: c.kind === 'direct'
-			? [c.prefix]
-			: c.kind === 'fixed'
-				? [c.bytes]
-				: []
+	c.kind === 'enum' ? Object.values(c.choices) : c.kind === 'direct' ? [c.prefix] : c.kind === 'fixed' ? [c.bytes] : []
 
 // --- codec -----------------------------------------------------------------
 test('encodeNibbles / decodeNibbles round-trip', () => {
@@ -68,7 +62,10 @@ test('encodeNibbles / decodeNibbles round-trip', () => {
 	]) {
 		const nib = encodeNibbles(v, n)
 		assert.equal(nib.length, n)
-		assert.ok(nib.every((b) => b >= 0 && b <= 0x0f), 'only low nibbles')
+		assert.ok(
+			nib.every((b) => b >= 0 && b <= 0x0f),
+			'only low nibbles',
+		)
 		assert.equal(decodeNibbles(nib), v)
 	}
 	assert.deepEqual(encodeNibbles(0xab, 2), [0x0a, 0x0b])
@@ -87,10 +84,7 @@ test('decodeReply handles each decode type', () => {
 	assert.equal(decodeReply({ type: 'value' }, [0x0a, 0x0b]), '171') // 0xab
 	assert.equal(decodeReply({ type: 'enum', map: ENUM.ae }, [0x03]), 'Manual')
 	assert.equal(decodeReply({ type: 'enum', map: ENUM.ae }, [0x99]), '0x99') // fallback
-	assert.match(
-		decodeReply({ type: 'version' }, [0x00, 0x23, 0x00, 0x00, 0x00, 0x01, 0x02]),
-		/vendor=0x0023/,
-	)
+	assert.match(decodeReply({ type: 'version' }, [0x00, 0x23, 0x00, 0x00, 0x00, 0x01, 0x02]), /vendor=0x0023/)
 	const [b2, b3] = SYSTEM[4]
 	assert.equal(decodeReply({ type: 'system' }, [0x00, 0x00, b2, b3]), '1080p30')
 })
@@ -211,7 +205,10 @@ test('SYSTEM_NAMES covers exactly the SYSTEM modes with non-empty string labels'
 
 // --- Gain (ISO) named-step table (OG03A10) ---------------------------------
 test('GAIN_ISO raw values match the OG03A10 ISO->raw formula for all 18 steps', () => {
-	assert.deepEqual(GAIN_ISO_STEPS, [140, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400])
+	assert.deepEqual(
+		GAIN_ISO_STEPS,
+		[140, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400],
+	)
 	assert.equal(GAIN_ISO.length, 18)
 	for (const { iso, raw } of GAIN_ISO) {
 		// Recompute independently: real_gain_unit = floor(ISO*1000/MIN_ISO), then
@@ -255,12 +252,18 @@ test('the raw Gain (direct) number control is left untouched alongside the new I
 	assert.deepEqual(COMMANDS.cam_gain_direct.prefix, [0x01, 0x04, 0x4c, 0x00, 0x00])
 	assert.equal(COMMANDS.cam_gain_direct.nibbles, 3)
 	// the ISO control is additive and is NOT turned into a knob param
-	assert.equal(continuousParams().some((p) => p.id === 'cam_gain_iso'), false)
+	assert.equal(
+		continuousParams().some((p) => p.id === 'cam_gain_iso'),
+		false,
+	)
 })
 
 // --- Shutter (Speed) named-step table ---------------------------------------
 test('SHUTTER_SPEEDS us/raw values match the formula for all 17 steps', () => {
-	assert.deepEqual(SHUTTER_SPEED_STEPS, [8000, 4000, 2000, 1000, 800, 600, 500, 400, 250, 200, 125, 120, 100, 60, 50, 33, 30])
+	assert.deepEqual(
+		SHUTTER_SPEED_STEPS,
+		[8000, 4000, 2000, 1000, 800, 600, 500, 400, 250, 200, 125, 120, 100, 60, 50, 33, 30],
+	)
 	assert.equal(SHUTTER_SPEEDS.length, 17)
 	for (const { n, us, raw } of SHUTTER_SPEEDS) {
 		// Recompute independently: us = round(1e6/n) (plain unit conversion),
@@ -305,7 +308,10 @@ test('the raw Shutter (direct) number control is left untouched alongside the ne
 	assert.deepEqual(COMMANDS.cam_shutter_direct.prefix, [0x01, 0x04, 0x4a, 0x00, 0x00])
 	assert.equal(COMMANDS.cam_shutter_direct.nibbles, 3)
 	// the Speed control is additive and is NOT turned into a knob param
-	assert.equal(continuousParams().some((p) => p.id === 'cam_shutter_speed'), false)
+	assert.equal(
+		continuousParams().some((p) => p.id === 'cam_shutter_speed'),
+		false,
+	)
 })
 
 // --- Color Temp (Kelvin) / wb_temp -----------------------------------------
@@ -454,12 +460,14 @@ test('a continuous param builds the expected absolute-set frame', () => {
 
 // --- end-to-end frame shape (buildFrame + table) ---------------------------
 test('representative frames build to the exact bytes', () => {
+	assert.deepEqual([...buildFrame(1, COMMANDS.cam_ae.choices['Auto'])], [0x81, 0x01, 0x04, 0x39, 0x00, 0xff])
 	assert.deepEqual(
-		[...buildFrame(1, COMMANDS.cam_ae.choices['Auto'])],
-		[0x81, 0x01, 0x04, 0x39, 0x00, 0xff],
-	)
-	assert.deepEqual(
-		[...buildFrame(1, [...COMMANDS.dct_black_master.prefix, ...encodeNibbles(0x12, COMMANDS.dct_black_master.nibbles)])],
+		[
+			...buildFrame(1, [
+				...COMMANDS.dct_black_master.prefix,
+				...encodeNibbles(0x12, COMMANDS.dct_black_master.nibbles),
+			]),
+		],
 		[0x81, 0x01, 0x7e, 0x01, 0x03, 0x00, 0x01, 0x02, 0xff],
 	)
 	assert.deepEqual([...buildFrame(1, INQUIRIES.dct_filter_enable.payload)], [0x81, 0x09, 0x7e, 0x01, 0x14, 0xff])
@@ -475,7 +483,7 @@ test('Color Gain (direct) uses 2 nibbles for its full 0-255 range (post_sat)', (
 	)
 })
 
-test('toSigned reinterprets a 2-nibble byte as two\'s-complement int8', () => {
+test("toSigned reinterprets a 2-nibble byte as two's-complement int8", () => {
 	assert.equal(toSigned(0, 2), 0)
 	assert.equal(toSigned(127, 2), 127)
 	assert.equal(toSigned(128, 2), -128)
@@ -509,7 +517,11 @@ test('decodeReply uses decode.nibbles (not the padded payload length) for signed
 	// never see the 8-bit sign bit -- silently reporting -5 as 251 instead.
 	const padded = [0x00, 0x00, 0x0f, 0x0b] // -5, as an 8-bit value, padded to 4 bytes
 	assert.equal(decodeReply({ type: 'value', signed: true, nibbles: 2 }, padded), '-5')
-	assert.equal(decodeReply({ type: 'value', signed: true }, padded), '251', 'without nibbles, padding breaks the sign bit')
+	assert.equal(
+		decodeReply({ type: 'value', signed: true }, padded),
+		'251',
+		'without nibbles, padding breaks the sign bit',
+	)
 })
 
 test("continuousParams' Color Hue entry has a signed -128..127 range", () => {
@@ -797,7 +809,10 @@ test('dct_tm_mode is exposed (0-4, direct + 5-choice preset) now that the BSP fi
 	assert.equal(c.min, 0)
 	assert.equal(c.max, 4)
 	assert.ok(INQUIRIES.dct_tm_mode)
-	assert.equal(continuousParams().some((p) => p.id === 'dct_tm_mode'), true)
+	assert.equal(
+		continuousParams().some((p) => p.id === 'dct_tm_mode'),
+		true,
+	)
 
 	const preset = COMMANDS.dct_tm_mode_preset
 	assert.equal(preset.kind, 'enum')
@@ -887,23 +902,65 @@ test('exactly the 36 calibration/setup-style inquiries are tagged once:true (sta
 	assert.deepEqual(
 		onceIds,
 		[
-			'dct_aec_maxgain', 'dct_aec_setpoint', 'dct_aec_speed', 'dct_audio_gain',
-			'dct_auto_save', 'dct_awb_speed', 'dct_black_blue', 'dct_black_green', 'dct_black_master',
-			'dct_black_red', 'dct_cnr_auto', 'dct_cnr_mode', 'dct_color_space',
-			'dct_filter_denoise', 'dct_filter_detail', 'dct_filter_enable',
-			'dct_flare_blue', 'dct_flare_green', 'dct_flare_red', 'dct_gain_mode', 'dct_lut_fast_gamma', 'dct_lut_fixed_mode',
-			'dct_lut_mode', 'dct_lut_preset', 'dct_mcc_opmode', 'dct_osd', 'dct_pq_max_bright',
-			'dct_sdi_black', 'dct_sdi_white', 'dct_slog3_gain', 'dct_tm_mode', 'flicker', 'flip',
-			'gamma', 'version', 'video_mode',
+			'dct_aec_maxgain',
+			'dct_aec_setpoint',
+			'dct_aec_speed',
+			'dct_audio_gain',
+			'dct_auto_save',
+			'dct_awb_speed',
+			'dct_black_blue',
+			'dct_black_green',
+			'dct_black_master',
+			'dct_black_red',
+			'dct_cnr_auto',
+			'dct_cnr_mode',
+			'dct_color_space',
+			'dct_filter_denoise',
+			'dct_filter_detail',
+			'dct_filter_enable',
+			'dct_flare_blue',
+			'dct_flare_green',
+			'dct_flare_red',
+			'dct_gain_mode',
+			'dct_lut_fast_gamma',
+			'dct_lut_fixed_mode',
+			'dct_lut_mode',
+			'dct_lut_preset',
+			'dct_mcc_opmode',
+			'dct_osd',
+			'dct_pq_max_bright',
+			'dct_sdi_black',
+			'dct_sdi_white',
+			'dct_slog3_gain',
+			'dct_tm_mode',
+			'flicker',
+			'flip',
+			'gamma',
+			'version',
+			'video_mode',
 		].sort(),
 	)
 })
 
 test('Gain/Shutter/AE/WB/RGB-gain/Green-gain/Bright/Contrast/Color-Gain-Hue/Timecode/SDI-Range/Audio-Enable/WB-temp stay on the continuous (non-once) tier', () => {
 	for (const id of [
-		'gain', 'shutter', 'ae_mode', 'wb_mode', 'rgain', 'bgain', 'dct_ggain', 'bright', 'contrast',
-		'color_gain', 'color_hue', 'dct_timecode_hold', 'dct_sdi_range', 'dct_audio_enable',
-		'dct_wb_temp', 'dct_wb_temp_min', 'dct_wb_temp_max',
+		'gain',
+		'shutter',
+		'ae_mode',
+		'wb_mode',
+		'rgain',
+		'bgain',
+		'dct_ggain',
+		'bright',
+		'contrast',
+		'color_gain',
+		'color_hue',
+		'dct_timecode_hold',
+		'dct_sdi_range',
+		'dct_audio_enable',
+		'dct_wb_temp',
+		'dct_wb_temp_min',
+		'dct_wb_temp_max',
 	]) {
 		assert.ok(!INQUIRIES[id].once, `${id} should not be tagged once:true`)
 	}
@@ -973,7 +1030,7 @@ test("Audio Gain's stepPercent is tuned to exactly one 0.5dB step, not the gener
 
 test('hueRawToDeg inverts the user-supplied degrees->raw example (22.1° -> raw 31)', () => {
 	// user's own worked example: hue=22.1° -> h=22.1*128/90=31.43.. -> round -> 31
-	assert.equal(hueRawToDeg(31), (31 * 90 / 128).toFixed(1))
+	assert.equal(hueRawToDeg(31), ((31 * 90) / 128).toFixed(1))
 	assert.equal(Number(hueRawToDeg(31)), 21.8) // round-trip lands close to, not exactly, 22.1 (integer raw quantization)
 })
 

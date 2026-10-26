@@ -29,7 +29,18 @@
 //   node tools/camera-check.mjs --group Exposure   (filter by COMMANDS group)
 //   node tools/camera-check.mjs --only gain        (filter by id/name substring)
 
-import { COMMANDS, INQUIRIES, RUD, TERMINATOR, encodeNibbles, buildFrame, decodeReply, continuousParams, GAIN_ISO, SHUTTER_SPEEDS } from '../src/commands.js'
+import {
+	COMMANDS,
+	INQUIRIES,
+	RUD,
+	TERMINATOR,
+	encodeNibbles,
+	buildFrame,
+	decodeReply,
+	continuousParams,
+	GAIN_ISO,
+	SHUTTER_SPEEDS,
+} from '../src/commands.js'
 
 const PORT = process.env.VISCA_TEST_PORT
 const BAUD = Number(process.env.VISCA_TEST_BAUD) || 115200
@@ -153,8 +164,22 @@ const LOSSY_ENUM_EXPECT = {
 // their wire encoding already IS the real value 1:1 (no scaling function in
 // the BSP at all for those). ---
 const RUD_SPEC = {
-	cam_gain: { verify: 'gain', reset: 1000, step: 109, min: 1000, max: 45715, scale: { min: 1000, max: 45715, rawMax: 4095 } },
-	cam_shutter: { verify: 'shutter', reset: 1000, step: 93, min: 100, max: 38339, scale: { min: 100, max: 38339, rawMax: 4095 } },
+	cam_gain: {
+		verify: 'gain',
+		reset: 1000,
+		step: 109,
+		min: 1000,
+		max: 45715,
+		scale: { min: 1000, max: 45715, rawMax: 4095 },
+	},
+	cam_shutter: {
+		verify: 'shutter',
+		reset: 1000,
+		step: 93,
+		min: 100,
+		max: 38339,
+		scale: { min: 100, max: 38339, rawMax: 4095 },
+	},
 	cam_rgain: { verify: 'rgain', reset: 512, step: 10, min: 0, max: 4095 },
 	cam_bgain: { verify: 'bgain', reset: 512, step: 10, min: 0, max: 4095 },
 	cam_bright: { verify: 'bright', reset: 0, step: 5, min: -128, max: 127 },
@@ -461,7 +486,9 @@ function describeFailure(res) {
 // reachable on real hardware). `reset_settings` is always the last command
 // sent to the camera.
 async function withAutoModesDisabled(fn) {
-	console.log('Disabling AWB and AEC for the duration of this run (manual gain/exposure/WB-gain tests need them off to hold a set value)...')
+	console.log(
+		'Disabling AWB and AEC for the duration of this run (manual gain/exposure/WB-gain tests need them off to hold a set value)...',
+	)
 	await setCommand(COMMANDS.cam_wb.choices['Manual'])
 	await setCommand(COMMANDS.cam_ae.choices['Manual'])
 

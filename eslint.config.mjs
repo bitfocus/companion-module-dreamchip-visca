@@ -14,7 +14,15 @@ export default [
 		rules: {
 			// formatting is advisory for now (see Jenkinsfile lint stage), not a hard error
 			'prettier/prettier': 'warn',
-			'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', destructuredArrayIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
+			'no-unused-vars': [
+				'error',
+				{
+					argsIgnorePattern: '^_',
+					varsIgnorePattern: '^_',
+					destructuredArrayIgnorePattern: '^_',
+					caughtErrorsIgnorePattern: '^_',
+				},
+			],
 		},
 	},
 	{
