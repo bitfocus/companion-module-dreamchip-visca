@@ -1,0 +1,5 @@
+[gerrit]
+host=gerrit.office.dreamchip.de
+port=29418
+project=project/provideo/sw/companion-module-dct-visca
+defaultbranch=main

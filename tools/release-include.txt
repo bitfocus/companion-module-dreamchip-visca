@@ -1,0 +1,11 @@
+# Paths exported from Gerrit `main` into the public release tree (one per line).
+# Allowlist on purpose: a new internal file never leaks by default.
+# Everything else in the release tree (.github/, LICENSE, .gitignore,
+# .gitattributes, .prettierignore, .yarnrc.yml) stays as upstream has it.
+# package.json, companion/manifest.json and README.md are rewritten by
+# tools/release-transform.mjs.
+src
+companion
+package.json
+yarn.lock
+README.md

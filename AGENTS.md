@@ -117,3 +117,41 @@ All shipped module code lives in `src/` (Companion loads `src/entry.js`;
   anything published upstream.
 - Before publishing anywhere public, work through the checklist in `TODO.md`
   (internal Gerrit URLs/sections must be scrubbed first).
+
+## Release process (GitHub upstream)
+
+Gerrit `main` is the only place development happens. `upstream`
+(`bitfocus/companion-module-dreamchip-visca`) receives release commits only: its
+history is a single template commit with no common ancestor with `main`, and
+`main`'s history (internal ticket IDs in commit messages) must never be pushed
+there.
+
+- Local `release` branch is rooted on `upstream/main` and never merged with
+  `main`. It gets one `Release vX.Y.Z` commit per release. Create it once with
+  `git branch release upstream/main`.
+- `remote.upstream.pushurl` is `DISABLED` and `remote.pushDefault` is `origin`,
+  so a plain `git push` can't reach GitHub. Publishing uses an explicit URL.
+- `tools/publish-release.sh [--dry-run] [--no-install] [--notes FILE] <x.y.z>`
+  builds the release commit from a clean `main` checkout:
+  - exports only the paths in `tools/release-include.txt` (an allowlist, so new
+    internal files stay private); `.github/`, `LICENSE`, `.gitignore`,
+    `.yarnrc.yml` etc. stay as upstream has them, and the template's
+    `src/actions.js`, `feedbacks.js`, `variables.js`, `upgrades.js` are removed;
+  - `tools/release-transform.mjs` sets the version, points `repository`/`bugs` at
+    GitHub, drops test/lint scripts and dev-dependencies (eslint, c8, globals)
+    from `package.json`, and strips the README "Cloning" section;
+  - runs `yarn install && yarn format && yarn package`, then a leak check (hard
+    patterns such as `ATHDR`, `*.dreamchip.de`, `gerrit`, `AGENTS`, `Jenkins`
+    fail the run; soft ones are only listed for review);
+  - commits to `release`, tags the Gerrit commit `vX.Y.Z-internal` locally, and
+    prints the push commands. It pushes nothing itself.
+- Flow: `--dry-run` first, then the real run, then
+  `git push origin release:refs/for/release` for review, and after approval push
+  `release:main` plus the `vX.Y.Z` tag to the public URL and publish the GitHub
+  release (its workflow packages the module).
+- `test/`, eslint/c8 config, `tools/`, the Jenkinsfiles and the internal docs
+  are not shipped. A new public file must be added to `tools/release-include.txt`.
+- Community PRs: `git fetch upstream`, then cherry-pick onto Gerrit `main` via
+  `refs/for/main`; never merge `release` into `main`.
+- The public repo keeps upstream's yarn/prettier setup and `enableScripts: false`
+  in `.yarnrc.yml`; check native `serialport` bindings still install with it.
