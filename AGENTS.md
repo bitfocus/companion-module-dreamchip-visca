@@ -110,7 +110,7 @@ All shipped module code lives in `src/` (Companion loads `src/entry.js`;
   report -> Warnings plugin; eslint errors and prettier formatting warnings only
   mark the build UNSTABLE) and `yarn test`
   (JUnit published) inside the provideo apptainer via `tool-apptainer/apptainer-provideo/run.sh`.
-  Node 22 + yarn 4.5.3 + libudev-dev live in that image
+  Node 22 + yarn 4.18.1 + libudev-dev live in that image
   (`apptainer/apptainer-provideo/container.def`); rebuild with `./build.sh -u`
   and keep the yarn version in sync with `packageManager` in `package.json`.
   Hardware tests are not run in CI. The Jenkinsfiles are internal: keep them out of
