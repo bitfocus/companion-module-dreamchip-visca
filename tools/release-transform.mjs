@@ -17,11 +17,12 @@ const writeJson = (name, data, indent) => fs.writeFileSync(file(name), JSON.stri
 const REPO = 'bitfocus/companion-module-dreamchip-visca'
 
 // package.json: drop test/lint tooling (test/, eslint and c8 config are not shipped).
+// eslint stays: @companion-module/tools declares it as a peer dependency.
 const pkg = readJson('package.json')
 pkg.version = version
 pkg.repository = { type: 'git', url: `git+https://github.com/${REPO}.git` }
 pkg.scripts = { format: 'prettier --write src', package: pkg.scripts.package }
-for (const dep of ['c8', 'eslint', 'eslint-formatter-checkstyle', 'globals']) delete pkg.devDependencies[dep]
+for (const dep of ['c8', 'eslint-formatter-checkstyle', 'globals']) delete pkg.devDependencies[dep]
 writeJson('package.json', pkg, 2)
 
 const manifest = readJson('companion/manifest.json')

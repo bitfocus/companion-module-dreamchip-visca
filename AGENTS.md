@@ -139,8 +139,9 @@ there.
     `.yarnrc.yml` etc. stay as upstream has them, and the template's
     `src/actions.js`, `feedbacks.js`, `variables.js`, `upgrades.js` are removed;
   - `tools/release-transform.mjs` sets the version, points `repository`/`bugs` at
-    GitHub, drops test/lint scripts and dev-dependencies (eslint, c8, globals)
-    from `package.json`, and strips the README "Cloning" section;
+    GitHub, drops test/lint scripts and dev-dependencies (c8, globals,
+    eslint-formatter-checkstyle; eslint stays, it is a peer of
+    `@companion-module/tools`) from `package.json`, and strips the README "Cloning" section;
   - runs `yarn install && yarn format && yarn package`, then a leak check (hard
     patterns such as `ATHDR`, `*.dreamchip.de`, `gerrit`, `AGENTS`, `Jenkins`
     fail the run; soft ones are only listed for review);
@@ -154,5 +155,6 @@ there.
   are not shipped. A new public file must be added to `tools/release-include.txt`.
 - Community PRs: `git fetch upstream`, then cherry-pick onto Gerrit `main` via
   `refs/for/main`; never merge `release` into `main`.
-- The public repo keeps upstream's yarn/prettier setup and `enableScripts: false`
-  in `.yarnrc.yml`; check native `serialport` bindings still install with it.
+- The public repo keeps upstream's yarn/prettier setup. Its `enableScripts: false`
+  only skips `serialport`'s `node-gyp-build` fallback; the prebuilds ship in the
+  npm package and the packaged module bundles no native binaries.
