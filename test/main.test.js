@@ -274,3 +274,68 @@ test('polling on: a toggle only sends the command and leaves confirming to the p
 		await camera.close()
 	}
 })
+
+// The generic per-choice buttons are generated from COMMANDS. With polling off
+// the ones whose toggle button shows live state must read it back too, and the
+// rest must not: a stray inquiry would just slow the serial queue down.
+const CONFIRMING_ENUM_BUTTONS = [
+	// [COMMANDS id, choice, INQUIRIES id it reads back]
+	['cam_ae', 'Manual', 'ae_mode'],
+	['cam_wb', 'Manual', 'wb_mode'],
+	['dct_sdi_range', 'Full', 'dct_sdi_range'],
+	['dct_audio_enable', 'On', 'dct_audio_enable'],
+	['dct_timecode_hold', 'Hold', 'dct_timecode_hold'],
+]
+const PLAIN_ENUM_BUTTONS = [
+	['cam_flicker', '60Hz'],
+	['cam_gamma', 'HLG'],
+	['dct_cnr_auto', 'On'],
+	['dct_auto_save', 'On'],
+]
+
+// Send-only mode (Poll ms 0), startup poll done, camera log empty.
+async function sendOnly() {
+	const camera = new FakeCamera()
+	await camera.listen()
+	const inst = await connect(camera, { pollInterval: 0 })
+	await waitFor('Ok', () => statuses().includes('ok'))
+	await settled(inst)
+	return { camera, inst }
+}
+
+// Press a generic enum button and return the frames the camera saw, once at
+// least `min` arrived and the module has been quiet for a moment.
+async function press(camera, inst, id, choice, min) {
+	camera.received.length = 0
+	inst.actions[id].callback({ options: { choice } })
+	await waitFor(`${id} frames`, () => camera.received.length >= min)
+	await sleep(50) // anything else the button would send follows at once
+	await waitFor('an idle queue', () => !inst.inflight && inst.queue.length === 0)
+	return [...camera.received]
+}
+
+test('Poll ms 0: enum buttons with a live-state toggle read the state back', async () => {
+	const { camera, inst } = await sendOnly()
+	try {
+		for (const [id, choice, inquiry] of CONFIRMING_ENUM_BUTTONS) {
+			const frames = await press(camera, inst, id, choice, 2)
+			assert.deepEqual(frames, [frameHex(COMMANDS[id].choices[choice]), frameHex(INQUIRIES[inquiry].payload)], id)
+		}
+	} finally {
+		await inst.destroy()
+		await camera.close()
+	}
+})
+
+test('Poll ms 0: the other enum buttons only send their command', async () => {
+	const { camera, inst } = await sendOnly()
+	try {
+		for (const [id, choice] of PLAIN_ENUM_BUTTONS) {
+			const frames = await press(camera, inst, id, choice, 1)
+			assert.deepEqual(frames, [frameHex(COMMANDS[id].choices[choice])], id)
+		}
+	} finally {
+		await inst.destroy()
+		await camera.close()
+	}
+})
