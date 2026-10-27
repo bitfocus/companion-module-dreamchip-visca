@@ -15,18 +15,35 @@
 # --dry-run builds and checks in a scratch worktree, then discards it.
 set -euo pipefail
 
+usage() {
+	cat <<'USAGE'
+usage: tools/publish-release.sh [options] <x.y.z>
+
+Builds one squashed release commit on the local `release` branch from the
+allowlisted files of a clean checkout (tools/release-include.txt), with the
+commit body taken from the `## <x.y.z>` section of CHANGELOG.md. Pushes nothing.
+
+options:
+  --dry-run     build and check in a scratch worktree, then discard it
+  --no-install  skip yarn install/format/package
+  --ref REF     commit to release (default HEAD)
+  -h, --help    show this help
+USAGE
+}
+
 dry=0 install=1 ref=HEAD
 while [[ $# -gt 0 ]]; do
 	case $1 in
+		-h|--help) usage; exit 0 ;;
 		--dry-run) dry=1 ;;
 		--no-install) install=0 ;;
 		--ref) ref=$2; shift ;;
-		-*) echo "unknown option $1" >&2; exit 2 ;;
+		-*) echo "unknown option $1" >&2; usage >&2; exit 2 ;;
 		*) version=$1 ;;
 	esac
 	shift
 done
-[[ ${version:-} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "usage: $0 [options] <x.y.z>" >&2; exit 2; }
+[[ ${version:-} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { usage >&2; exit 2; }
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
