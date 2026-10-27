@@ -131,7 +131,8 @@ there.
   `git branch release upstream/main`.
 - `remote.upstream.pushurl` is `DISABLED` and `remote.pushDefault` is `origin`,
   so a plain `git push` can't reach GitHub. Publishing uses an explicit URL.
-- `tools/publish-release.sh [--dry-run] [--no-install] [--notes FILE] <x.y.z>`
+- `tools/publish-release.sh [--dry-run] [--no-install] <x.y.z>`
+  (commit body = the `## x.y.z` section of `CHANGELOG.md`, which is shipped)
   builds the release commit from a clean `main` checkout:
   - exports only the paths in `tools/release-include.txt` (an allowlist, so new
     internal files stay private); `.github/`, `LICENSE`, `.gitignore`,

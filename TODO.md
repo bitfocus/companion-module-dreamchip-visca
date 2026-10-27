@@ -13,7 +13,8 @@ this file, `Jenkinsfile*`, `.github/`) are no longer needed. What is left:
       `serialport` bindings, and review the `yarn.lock` change.
 - [ ] Ask the Gerrit admin for a `release` branch in the project (needed for
       `git push origin release:refs/for/release`).
-- [ ] Write the user-facing changelog for `--notes` (no ticket IDs).
+- [ ] Review the `## <version>` section of `CHANGELOG.md` (no ticket IDs); the
+      script uses it as the release commit body.
 - [ ] Review the soft leak-check hits the script lists.
 - [ ] Decide whether upstream's template `apiVersion`/node26/base 2.1 should
       ever replace node22/base 1.11 (currently kept on 1.11).

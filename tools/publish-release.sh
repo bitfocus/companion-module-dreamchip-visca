@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds one squashed release commit for the public upstream repo.
 #
-#   tools/publish-release.sh [--dry-run] [--no-install] [--notes FILE] [--ref REF] <version>
+#   tools/publish-release.sh [--dry-run] [--no-install] [--ref REF] <version>
 #
 # Gerrit `main` stays the only place where development happens. The local
 # `release` branch (rooted on upstream's template commit, no shared history
@@ -9,16 +9,17 @@
 # (default HEAD) from tools/release-include.txt, rewritten by
 # tools/release-transform.mjs, on top of upstream-owned files.
 #
+# The commit body is the `## <version>` section of CHANGELOG.md.
+#
 # Nothing is pushed. The commands to review and publish are printed at the end.
 # --dry-run builds and checks in a scratch worktree, then discards it.
 set -euo pipefail
 
-dry=0 install=1 notes='' ref=HEAD
+dry=0 install=1 ref=HEAD
 while [[ $# -gt 0 ]]; do
 	case $1 in
 		--dry-run) dry=1 ;;
 		--no-install) install=0 ;;
-		--notes) notes=$2; shift ;;
 		--ref) ref=$2; shift ;;
 		-*) echo "unknown option $1" >&2; exit 2 ;;
 		*) version=$1 ;;
@@ -78,7 +79,9 @@ fi
 
 # 5. One commit on `release`, internal provenance tag on the Gerrit commit.
 msg="Release v$version"
-[[ -n $notes ]] && msg+=$'\n\n'$(cat "$notes")
+body=$(git show "$src:CHANGELOG.md" | awk -v v="## $version" '$0 == v { on = 1; next } /^## / { on = 0 } on')
+[[ -n ${body//[$' \t\n']/} ]] || { echo "no notes: add a '## $version' section to CHANGELOG.md" >&2; exit 1; }
+msg+=$'\n\n'$body
 git -C "$work" commit -q -m "$msg"
 new=$(git -C "$work" rev-parse HEAD)
 git -C "$work" checkout -q --detach   # frees `release` for the branch update
