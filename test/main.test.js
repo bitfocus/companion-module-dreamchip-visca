@@ -16,6 +16,8 @@ import { COMMANDS, INQUIRIES, TERMINATOR, encodeNibbles } from '../src/commands.
 
 const realSetTimeout = setTimeout
 const realClearTimeout = clearTimeout
+const realSetInterval = setInterval
+const realClearInterval = clearInterval
 const sleep = (ms) => new Promise((resolve) => realSetTimeout(resolve, ms))
 
 async function waitFor(what, cond, timeoutMs = 3000) {
@@ -59,6 +61,24 @@ function fakeRequestTimeouts() {
 	}
 }
 
+// Same for the live poll's setInterval (the 5 s serial-port scan keeps its real timer).
+function fakePollInterval(ms) {
+	let timer
+	globalThis.setInterval = (fn, every, ...args) => {
+		if (every !== ms) return realSetInterval(fn, every, ...args)
+		timer = { fn: () => fn(...args) }
+		return timer
+	}
+	globalThis.clearInterval = (t) => (t === timer ? (timer = undefined) : realClearInterval(t))
+	return {
+		tick: () => timer.fn(),
+		restore() {
+			globalThis.setInterval = realSetInterval
+			globalThis.clearInterval = realClearInterval
+		},
+	}
+}
+
 const hex = (b) => Buffer.from(b).toString('hex')
 
 // Answers `version` like an Atom Two (vendor 0x0020, model 0x0000, ROM
@@ -72,10 +92,12 @@ class FakeCamera {
 	hold = false
 	answer = Infinity // requests beyond this many are held back
 	replies = {}
+	connections = 0 // sockets accepted so far
 	sockets = new Set()
 
 	async listen() {
 		this.server = net.createServer((sock) => {
+			this.connections++
 			this.sockets.add(sock)
 			sock.on('close', () => this.sockets.delete(sock))
 			sock.on('error', () => {})
@@ -303,16 +325,21 @@ async function sendOnly(pollInterval = 0) {
 	return { camera, inst }
 }
 
-// Press a generic enum button and return the frames the camera saw, once at
-// least `min` arrived and the module has been quiet for a moment.
-async function press(camera, inst, id, choice, min) {
+// Run `act` and return the frames the camera saw: once at least `min` arrived
+// and the module has been quiet for a moment (anything else the action would
+// send follows at once).
+async function framesAfter(camera, inst, min, act) {
 	camera.received.length = 0
-	inst.actions[id].callback({ options: { choice } })
-	await waitFor(`${id} frames`, () => camera.received.length >= min)
-	await sleep(50) // anything else the button would send follows at once
+	act()
+	await waitFor('the expected frames', () => camera.received.length >= min)
+	await sleep(50)
 	await waitFor('an idle queue', () => !inst.inflight && inst.queue.length === 0)
 	return [...camera.received]
 }
+
+// Press a generic enum button.
+const press = (camera, inst, id, choice, min) =>
+	framesAfter(camera, inst, min, () => inst.actions[id].callback({ options: { choice } }))
 
 test('Poll ms 0: enum buttons with a live-state toggle read the state back', async () => {
 	const { camera, inst } = await sendOnly()
@@ -376,6 +403,266 @@ test('Green Gain buttons with polling on still read the value back, but leave WB
 		const frames = await press(camera, inst, 'dct_ggain', 'Up', 2)
 		assert.deepEqual(frames, [frameHex(COMMANDS.dct_ggain.choices.Up), ASK_GGAIN])
 		assert.equal(inst.knob.dct_ggain, GGAIN_RAW)
+	} finally {
+		await inst.destroy()
+		await camera.close()
+	}
+})
+
+// --- knobs ------------------------------------------------------------------
+// adjustParam() is what every rotary-knob turn and the relative Adjust action
+// end up in: clamp, send an absolute direct SET, write the new value into
+// knob/state/variable and (re)start the knob's lock against stale poll replies.
+
+const directFrame = (id, value) => frameHex([...COMMANDS[id].prefix, ...encodeNibbles(value, COMMANDS[id].nibbles)])
+const turn = (camera, inst, id, delta) => framesAfter(camera, inst, 1, () => inst.adjustParam(id, delta))
+const valueReply = (raw, nibbles) => Buffer.from([0x90, 0x50, ...encodeNibbles(raw, nibbles), TERMINATOR])
+
+test('a knob turn sends the direct value, shows it at once and locks the knob', async () => {
+	const { camera, inst } = await sendOnly(2000)
+	try {
+		assert.equal(inst.readValue('dct_wb_temp'), 0, 'nothing known yet reads as 0')
+		inst.state.dct_wb_temp = '5600'
+		assert.equal(inst.readValue('dct_wb_temp'), 5600, 'falls back to the polled value')
+		inst.knob.dct_wb_temp = 5600
+
+		// 5700 K = 0x1644 on four nibbles
+		const frames = await turn(camera, inst, 'dct_wb_temp', 100)
+		assert.deepEqual(frames, ['81017e010b01060404ff'])
+		assert.equal(variables().dct_wb_temp, '5700')
+		assert.equal(inst.knob.dct_wb_temp, 5700)
+		assert.ok(inst.knobLockUntil.dct_wb_temp > Date.now(), 'the knob is locked against background polls')
+
+		// signed values go out as two's complement: -4 on three nibbles is 0xFFC
+		inst.knob.dct_black_master = 0
+		assert.deepEqual(await turn(camera, inst, 'dct_black_master', -4), ['81017e01030f0f0cff'])
+		assert.equal(variables().dct_black_master, '-4')
+	} finally {
+		await inst.destroy()
+		await camera.close()
+	}
+})
+
+test('a knob turn stops at the parameter range, and at the per-model maximum', async () => {
+	const { camera, inst } = await sendOnly(2000)
+	try {
+		const cases = [
+			// [param, current, delta, expected]
+			['dct_wb_temp', 9990, 100, 10000],
+			['dct_wb_temp', 2250, -100, 2200],
+			['dct_black_master', 2040, 100, 2047],
+			['dct_filter_denoise', 6, 10, 16], // Atom Two: 0-255
+		]
+		for (const [id, cur, delta, expected] of cases) {
+			inst.knob[id] = cur
+			assert.deepEqual(await turn(camera, inst, id, delta), [directFrame(id, expected)], `${id} ${cur}${delta}`)
+			assert.equal(inst.knob[id], expected, `${id} ${cur}${delta}`)
+		}
+
+		inst.cameraModel = 'atom-two-hdr' // Filter Denoise only goes to 7 there
+		inst.knob.dct_filter_denoise = 6
+		assert.deepEqual(await turn(camera, inst, 'dct_filter_denoise', 10), [directFrame('dct_filter_denoise', 7)])
+	} finally {
+		await inst.destroy()
+		await camera.close()
+	}
+})
+
+test('a log-scaled knob steps by a percentage, with a floor at the low end', async () => {
+	const { camera, inst } = await sendOnly(2000)
+	try {
+		const cases = [
+			// [current, delta, expected]; only the sign of delta counts
+			[1000, 4, 1050], // +5%
+			[1000, 100, 1050],
+			[1000, -4, 952], // /1.05
+			[10, 1, 14], // 5% would round to 11: the 4-unit minimum step wins
+			[3, -1, 0], // never below 0
+			[0, 1, 4], // from 0 the minimum step gets it going
+		]
+		for (const [cur, delta, expected] of cases) {
+			inst.knob.gain = cur
+			assert.deepEqual(
+				await turn(camera, inst, 'cam_gain_direct', delta),
+				[directFrame('cam_gain_direct', expected)],
+				`${cur} ${delta}`,
+			)
+		}
+	} finally {
+		await inst.destroy()
+		await camera.close()
+	}
+})
+
+test('a background poll reply cannot undo a knob turn, a deliberate read-back can', async () => {
+	const { camera, inst } = await sendOnly(2000)
+	try {
+		inst.knob.rgain = 100
+		await turn(camera, inst, 'cam_rgain_direct', 4)
+		assert.equal(inst.knob.rgain, 104)
+
+		// a poll request sent before the turn answers late with the old value
+		inst.applyInquiryReply(INQUIRIES.rgain, valueReply(900, 3), 0x50)
+		assert.equal(inst.knob.rgain, 104, 'locked: the stale reply must not stomp the knob')
+		assert.equal(variables().rgain, '900', 'but the variable shows what the camera says')
+
+		inst.applyInquiryReply(INQUIRIES.rgain, valueReply(700, 3), 0x50, { resyncKnob: true })
+		assert.equal(inst.knob.rgain, 700, 'a deliberate read-back always wins')
+
+		inst.knobLockUntil.rgain = Date.now() - 1 // the lock ran out
+		inst.applyInquiryReply(INQUIRIES.rgain, valueReply(900, 3), 0x50)
+		assert.equal(inst.knob.rgain, 900, 'unlocked: external changes are picked up again')
+	} finally {
+		await inst.destroy()
+		await camera.close()
+	}
+})
+
+test('a knob turn that can flip AE or WB to Manual re-reads that mode only without polling', async () => {
+	const off = await sendOnly(0)
+	try {
+		for (const [id, mode] of [
+			['cam_rgain_direct', 'wb_mode'],
+			['cam_gain_direct', 'ae_mode'],
+		]) {
+			const frames = await turn(off.camera, off.inst, id, 4)
+			assert.equal(frames.length, 2, id)
+			assert.equal(frames[1], frameHex(INQUIRIES[mode].payload), `${id} reads back ${mode}`)
+		}
+	} finally {
+		await off.inst.destroy()
+		await off.camera.close()
+	}
+
+	const on = await sendOnly(2000)
+	try {
+		assert.equal((await turn(on.camera, on.inst, 'cam_rgain_direct', 4)).length, 1)
+	} finally {
+		await on.inst.destroy()
+		await on.camera.close()
+	}
+})
+
+// --- poll cycles ------------------------------------------------------------
+const NO_POLL = ['color_temp', 'dct_wb_temp_measure'] // never worth a round trip, or on-demand only
+const GATED_ON_ATOM_TWO = ['dct_tm_mode', 'dct_tm_mode_preset']
+const askFrames = (ids) => ids.map((id) => frameHex(INQUIRIES[id].payload)).sort()
+const inquiryIds = (keep) =>
+	Object.entries(INQUIRIES)
+		.filter(([id, q]) => keep(id, q))
+		.map(([id]) => id)
+
+test('the live poll cycle asks only the live tier', async () => {
+	const interval = fakePollInterval(2000)
+	const { camera, inst } = await sendOnly(2000)
+	try {
+		const frames = await framesAfter(camera, inst, 1, () => interval.tick())
+		const live = inquiryIds((id, q) => !q.once && !NO_POLL.includes(id) && !GATED_ON_ATOM_TWO.includes(id))
+		assert.deepEqual([...frames].sort(), askFrames(live))
+	} finally {
+		await inst.destroy()
+		interval.restore()
+		await camera.close()
+	}
+})
+
+test('a live poll cycle still running blocks the next one', async () => {
+	const interval = fakePollInterval(2000)
+	const { camera, inst } = await sendOnly(2000)
+	try {
+		camera.hold = true
+		camera.received.length = 0
+		interval.tick()
+		await waitFor('the first inquiry', () => camera.received.length === 1)
+		interval.tick() // the camera has not answered yet: a second cycle would only grow the backlog
+		interval.tick()
+		await sleep(50)
+		assert.equal(camera.received.length, 1)
+
+		camera.release()
+		await settled(inst)
+		const live = inquiryIds((id, q) => !q.once && !NO_POLL.includes(id) && !GATED_ON_ATOM_TWO.includes(id))
+		assert.deepEqual([...camera.received].sort(), askFrames(live), 'exactly one cycle in the end')
+	} finally {
+		await inst.destroy()
+		interval.restore()
+		await camera.close()
+	}
+})
+
+test('"Poll inquiries now" asks everything that can ever answer, startup tier included', async () => {
+	const { camera, inst } = await sendOnly(0)
+	try {
+		const frames = await framesAfter(camera, inst, 1, () => inst.actions.poll_now.callback({ options: {} }))
+		const all = inquiryIds((id) => !NO_POLL.includes(id) && !GATED_ON_ATOM_TWO.includes(id))
+		assert.deepEqual([...frames].sort(), askFrames(all))
+	} finally {
+		await inst.destroy()
+		await camera.close()
+	}
+})
+
+// --- configUpdated / destroy -------------------------------------------------
+const saved = () => sent.filter((m) => m.name === 'saveConfig').map((m) => JSON.parse(m.payload).config)
+
+test('configUpdated corrects values the editor only hints at, and saves the correction', async () => {
+	const { camera, inst } = await sendOnly(0)
+	try {
+		const base = { ...inst.config }
+		await inst.configUpdated({ ...base, knobStep: 0, pollInterval: 1999 }) // just under the 2 s floor
+		assert.equal(inst.config.knobStep, 4)
+		assert.equal(inst.config.pollInterval, 2000)
+		assert.equal(saved().length, 2, 'one save per correction')
+		assert.equal(saved().at(-1).pollInterval, 2000)
+
+		const before = saved().length
+		await inst.configUpdated({ ...base, knobStep: 8, pollInterval: 0 }) // 0 = off is valid
+		assert.equal(inst.config.pollInterval, 0)
+		assert.equal(inst.config.knobStep, 8)
+		await inst.configUpdated({ ...base, pollInterval: 2000 }) // exactly the floor
+		assert.equal(inst.config.pollInterval, 2000)
+		assert.equal(saved().length, before, 'valid values are left alone')
+	} finally {
+		await inst.destroy()
+		await camera.close()
+	}
+})
+
+test('configUpdated reconnects only when a connection setting changed', async () => {
+	const { camera, inst } = await sendOnly(0)
+	const other = new FakeCamera()
+	await other.listen()
+	try {
+		const socket = inst.socket
+		await inst.configUpdated({ ...inst.config, pollInterval: 3000, knobStep: 8, address: 2 })
+		assert.equal(inst.socket, socket, 'Poll ms, knob step and address do not touch the link')
+		assert.equal(camera.connections, 1)
+
+		await inst.configUpdated({ ...inst.config, port: other.port })
+		assert.notEqual(inst.socket, socket, 'a new port is a new connection')
+		await waitFor('the new camera to be asked', () => other.received.length > 0)
+		await settled(inst) // its startup poll holds a safety timer until it ends
+		assert.equal(camera.connections, 1)
+	} finally {
+		await inst.destroy()
+		await camera.close()
+		await other.close()
+	}
+})
+
+test('configUpdated and destroy start and stop the poll timer', async () => {
+	const { camera, inst } = await sendOnly(0)
+	try {
+		assert.equal(inst.pollTimer, undefined)
+		await inst.configUpdated({ ...inst.config, pollInterval: 2000 })
+		assert.ok(inst.pollTimer, 'a poll interval starts the timer')
+		await inst.configUpdated({ ...inst.config, pollInterval: 0 })
+		assert.equal(inst.pollTimer, undefined, '0 stops it again')
+
+		await inst.configUpdated({ ...inst.config, pollInterval: 2000 })
+		await inst.destroy()
+		assert.equal(inst.pollTimer, undefined)
+		await waitFor('the link to close', () => camera.sockets.size === 0)
 	} finally {
 		await inst.destroy()
 		await camera.close()
