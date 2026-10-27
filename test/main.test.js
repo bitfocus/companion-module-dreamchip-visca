@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import net from 'node:net'
 
 import { DctViscaInstance } from '../src/main.js'
-import { COMMANDS, INQUIRIES, TERMINATOR } from '../src/commands.js'
+import { COMMANDS, INQUIRIES, TERMINATOR, encodeNibbles } from '../src/commands.js'
 
 const realSetTimeout = setTimeout
 const realClearTimeout = clearTimeout
@@ -293,11 +293,11 @@ const PLAIN_ENUM_BUTTONS = [
 	['dct_auto_save', 'On'],
 ]
 
-// Send-only mode (Poll ms 0), startup poll done, camera log empty.
-async function sendOnly() {
+// Startup poll done (send-only mode unless a poll interval is given).
+async function sendOnly(pollInterval = 0) {
 	const camera = new FakeCamera()
 	await camera.listen()
-	const inst = await connect(camera, { pollInterval: 0 })
+	const inst = await connect(camera, { pollInterval })
 	await waitFor('Ok', () => statuses().includes('ok'))
 	await settled(inst)
 	return { camera, inst }
@@ -334,6 +334,48 @@ test('Poll ms 0: the other enum buttons only send their command', async () => {
 			const frames = await press(camera, inst, id, choice, 1)
 			assert.deepEqual(frames, [frameHex(COMMANDS[id].choices[choice])], id)
 		}
+	} finally {
+		await inst.destroy()
+		await camera.close()
+	}
+})
+
+// Green Gain is an enum button (Reset/Up/Down) that changes the real value
+// without saying where it landed, so it always reads the value back and resyncs
+// the knob from the answer, whatever the poll mode. Changing a gain can also
+// flip WB to Manual on older firmware, so with polling off WB is re-read too.
+const GGAIN_RAW = 1234 // what the camera says its green gain is now
+const ASK_GGAIN = frameHex(INQUIRIES.dct_ggain.payload)
+const ASK_WB_MODE = frameHex(INQUIRIES.wb_mode.payload)
+const GGAIN_REPLY = [0x90, 0x50, ...encodeNibbles(GGAIN_RAW, 3), TERMINATOR]
+
+test('Green Gain buttons read the value back and resync the knob; Poll ms 0 also re-reads WB', async () => {
+	const { camera, inst } = await sendOnly(0)
+	try {
+		camera.replies[ASK_GGAIN] = GGAIN_REPLY
+		for (const choice of ['Reset', 'Up', 'Down']) {
+			inst.knob.dct_ggain = 0
+			const frames = await press(camera, inst, 'dct_ggain', choice, 3)
+			assert.deepEqual(frames, [frameHex(COMMANDS.dct_ggain.choices[choice]), ASK_GGAIN, ASK_WB_MODE], choice)
+			assert.equal(inst.knob.dct_ggain, GGAIN_RAW, `${choice}: knob resynced from the reply`)
+		}
+		assert.equal(variables().dct_ggain, String(GGAIN_RAW))
+	} finally {
+		await inst.destroy()
+		await camera.close()
+	}
+})
+
+test('Green Gain buttons with polling on still read the value back, but leave WB to the poll', async () => {
+	const { camera, inst } = await sendOnly(2000)
+	try {
+		camera.replies[ASK_GGAIN] = GGAIN_REPLY
+		inst.knob.dct_ggain = 0
+		// a recent knob turn shields the knob from background polls; this deliberate read-back must win anyway
+		inst.knobLockUntil.dct_ggain = Date.now() + 60000
+		const frames = await press(camera, inst, 'dct_ggain', 'Up', 2)
+		assert.deepEqual(frames, [frameHex(COMMANDS.dct_ggain.choices.Up), ASK_GGAIN])
+		assert.equal(inst.knob.dct_ggain, GGAIN_RAW)
 	} finally {
 		await inst.destroy()
 		await camera.close()
