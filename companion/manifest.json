@@ -1,28 +1,35 @@
 {
-	"$schema": "../node_modules/@companion-module/base/assets/manifest.schema.json",
-	"type": "connection",
-	"id": "your-module-name",
-	"name": "your-module-name",
-	"shortname": "module-shortname",
-	"description": "A short one line description of your module",
-	"version": "0.0.0",
-	"license": "MIT",
-	"repository": "git+https://github.com/bitfocus/companion-module-your-module-name.git",
-	"bugs": "https://github.com/bitfocus/companion-module-your-module-name/issues",
-	"maintainers": [
-		{
-			"name": "Your name",
-			"email": "Your email"
-		}
-	],
-	"runtime": {
-		"type": "node26",
-		"api": "nodejs-ipc",
-		"apiVersion": "0.0.0",
-		"entrypoint": "../src/main.js"
-	},
-	"legacyIds": [],
-	"manufacturer": "Your company",
-	"products": ["Your product"],
-	"keywords": []
+  "id": "dct-visca",
+  "name": "dct-visca",
+  "shortname": "VISCA",
+  "description": "Control Dream Chip cameras over VISCA",
+  "version": "0.8.0",
+  "license": "MIT",
+  "repository": "git+https://github.com/bitfocus/companion-module-dreamchip-visca.git",
+  "bugs": "https://github.com/bitfocus/companion-module-dreamchip-visca/issues",
+  "maintainers": [
+    {
+      "name": "atom-visca-support",
+      "email": "atom-visca-support@dreamchip.de"
+    }
+  ],
+  "legacyIds": [],
+  "runtime": {
+    "type": "node22",
+    "api": "nodejs-ipc",
+    "apiVersion": "1.11.3",
+    "entrypoint": "../src/entry.js",
+    "universal": true
+  },
+  "manufacturer": "Dream Chip Technologies",
+  "products": [
+    "VISCA"
+  ],
+  "keywords": [
+    "camera",
+    "visca",
+    "dct",
+    "dreamchip",
+    "provideo"
+  ]
 }
