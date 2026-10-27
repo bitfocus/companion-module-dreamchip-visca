@@ -2,16 +2,21 @@
 
 ## Before publishing to a public host
 
-Before publishing this module to an external / public host (e.g. GitHub or the
-Bitfocus module registry):
+Publishing goes through `tools/publish-release.sh` (see "Release process" in
+`AGENTS.md`); it exports only the allowlisted files and rewrites the public
+fields, so the old manual scrub steps (manifest URLs, README Cloning section,
+this file, `Jenkinsfile*`, `.github/`) are no longer needed. What is left:
 
-- [ ] `companion/manifest.json` — replace the `repository` and `bugs` URLs
-      (currently the internal Gerrit) with the real public URLs.
-- [ ] `README.md` — remove the **Cloning** section (internal Gerrit clone URL and
-      the `dct hooks install` workflow).
-- [ ] Remove the **Command coverage** section below (internal firmware roadmap).
-- [ ] `.github/` (workflows + issue templates, copied from upstream) only take
-      effect on GitHub; make sure the `Jenkinsfile*` files are not published.
+- [ ] Run the full `tools/publish-release.sh --dry-run <x.y.z>` once with
+      network (without `--no-install`): check that `yarn install`/`yarn package`
+      work with upstream's `.yarnrc.yml` (`enableScripts: false`) and the native
+      `serialport` bindings, and review the `yarn.lock` change.
+- [ ] Ask the Gerrit admin for a `release` branch in the project (needed for
+      `git push origin release:refs/for/release`).
+- [ ] Write the user-facing changelog for `--notes` (no ticket IDs).
+- [ ] Review the soft leak-check hits the script lists.
+- [ ] Decide whether upstream's template `apiVersion`/node26/base 2.1 should
+      ever replace node22/base 1.11 (currently kept on 1.11).
 
 ## Command coverage (firmware follow-ups)
 
