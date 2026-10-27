@@ -59,6 +59,8 @@ pipeline {
         stage('install') {
             steps {
                 sshagent(['77ba5f5a-cefd-41f2-b946-e26565b78d94']) {
+                    // TODO: remove once the yarn/corepack setup in the image is confirmed
+                    sh "${APPTAINER_RUN_SUBMIT} bash -c 'echo COREPACK_HOME=\$COREPACK_HOME; ls \$COREPACK_HOME/v1/yarn; corepack --version' || true"
                     sh "${APPTAINER_RUN_SUBMIT} bash -c 'node --version && yarn --version && yarn install --immutable'"
                 }
             }
