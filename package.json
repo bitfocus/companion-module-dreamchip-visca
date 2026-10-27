@@ -7,6 +7,7 @@
   "scripts": {
     "test": "node --test",
     "package": "companion-module-build",
+    "test:coverage": "node tools/coverage.mjs",
     "test:hardware": "node tools/camera-check.mjs",
     "lint": "eslint .",
     "format:check": "prettier --check src test tools eslint.config.mjs",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@companion-module/tools": ">=2.1.0 <2.4.0",
+    "c8": "^12.0.0",
     "eslint": "^9",
     "eslint-formatter-checkstyle": "^9.0.1",
     "globals": "^17.13.0",

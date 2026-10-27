@@ -6,3 +6,4 @@ pkg/
 eslint-report.xml
 test-results.xml
 .yarn-cache/
+coverage/

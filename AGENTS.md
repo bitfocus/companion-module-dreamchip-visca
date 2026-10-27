@@ -42,6 +42,9 @@ All shipped module code lives in `src/` (Companion loads `src/main.js`;
    those assertions plus `TESTPLAN.md` (hand-maintained, mirrors
    `COMMANDS`/`INQUIRIES` + `tools/provideo-names.mjs`) and possibly
    `tools/provideo-names.mjs`.
+- `yarn test:coverage` → `tools/coverage.mjs` (c8 over `node --test`, config in `.c8rc.json`: counts all of
+  `src/**`, so `main.js` shows as 0%; writes `coverage/cobertura-coverage.xml`,
+  which Jenkins publishes via `recordCoverage`, report-only).
 - Hardware test (not part of `yarn test`, needs a real serial camera):
   `VISCA_TEST_PORT=/dev/ttyUSB0 yarn test:hardware`. It resets camera
   settings before and after the run; destructive commands are skipped unless

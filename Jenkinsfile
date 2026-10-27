@@ -87,12 +87,15 @@ pipeline {
         stage('test') {
             steps {
                 sshagent(['77ba5f5a-cefd-41f2-b946-e26565b78d94']) {
-                    sh "${APPTAINER_RUN_SUBMIT} bash -c 'yarn test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=test-results.xml'"
+                    sh "${APPTAINER_RUN_SUBMIT} bash -c 'yarn test:coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=test-results.xml'"
                 }
             }
             post {
                 always {
                     junit allowEmptyResults: true, testResults: 'test-results.xml'
+                    // report-only for now, no quality gate
+                    recordCoverage tools: [[parser: 'COBERTURA', pattern: 'coverage/cobertura-coverage.xml']], \
+                        sourceCodeRetention: 'LAST_BUILD'
                 }
             }
         }
