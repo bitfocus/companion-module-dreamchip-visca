@@ -1,4 +1,4 @@
-import { InstanceBase, InstanceStatus, Regex, TCPHelper, runEntrypoint, combineRgb } from '@companion-module/base'
+import { InstanceBase, InstanceStatus, Regex, TCPHelper, combineRgb } from '@companion-module/base'
 import {
 	COMMANDS,
 	INQUIRIES,
@@ -242,7 +242,7 @@ const NO_POLL_INQUIRY_IDS = new Set(['color_temp', 'dct_wb_temp_measure'])
 // bug this constant fixes).
 const KNOB_LOCK_MS = 2500
 
-class DctViscaInstance extends InstanceBase {
+export class DctViscaInstance extends InstanceBase {
 	async init(config) {
 		this.config = config
 		this.state = {} // decoded inquiry values by varId (for feedbacks)
@@ -1546,5 +1546,3 @@ class DctViscaInstance extends InstanceBase {
 		if (this.socket) this.socket.destroy()
 	}
 }
-
-runEntrypoint(DctViscaInstance, [])

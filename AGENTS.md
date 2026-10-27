@@ -3,11 +3,11 @@
 Bitfocus Companion v4 module controlling Dream Chip cameras over VISCA (raw
 bytes over TCP or serial). No build step, no TypeScript — plain
 ESM (`"type": "module"`) JS that Companion loads directly via
-`companion/manifest.json` → `src/main.js`. Requires Node 22 (`engines: ^22`).
+`companion/manifest.json` → `src/entry.js`. Requires Node 22 (`engines: ^22`).
 
 ## Structure
 
-All shipped module code lives in `src/` (Companion loads `src/main.js`;
+All shipped module code lives in `src/` (Companion loads `src/entry.js`;
 `tools/` and `test/` import from there):
 
 - `src/commands.js` — the single source of truth: `COMMANDS`/`INQUIRIES` wire
@@ -15,7 +15,12 @@ All shipped module code lives in `src/` (Companion loads `src/main.js`;
   conversions. Actions, presets, variables and feedbacks in `src/main.js` are
   all generated from these tables; add features by editing tables, not by
   hand-wiring in main.js.
-- `src/main.js` — Companion entrypoint (`InstanceBase` + `runEntrypoint`):
+- `src/entry.js` — the actual Companion entrypoint: just `runEntrypoint(DctViscaInstance, [])`.
+  It is separate so tests can import `main.js` without starting Companion's
+  entrypoint (which needs `MODULE_MANIFEST`). `package.json` `main` and the
+  manifest's `runtime.entrypoint` must both point at it (the packaged build
+  bundles `package.json` `main`).
+- `src/main.js` — the `DctViscaInstance` class (`InstanceBase`, exported):
   transport, two-tier poller (inquiries tagged `once: true` are read once per
   connection; the rest repeat on the Poll ms interval, floor 2000), camera
   model detection from the version inquiry (some commands exist only on
