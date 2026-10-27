@@ -15,6 +15,7 @@ import { DctViscaInstance } from '../src/main.js'
 import { INQUIRIES, TERMINATOR } from '../src/commands.js'
 
 const realSetTimeout = setTimeout
+const realClearTimeout = clearTimeout
 const sleep = (ms) => new Promise((resolve) => realSetTimeout(resolve, ms))
 
 async function waitFor(what, cond, timeoutMs = 3000) {
@@ -22,6 +23,39 @@ async function waitFor(what, cond, timeoutMs = 3000) {
 	while (!cond()) {
 		if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`)
 		await sleep(5)
+	}
+}
+
+// The module waits this long for a terminal reply before giving up on a request.
+// Tests drive it by hand instead of waiting for real time.
+const REQUEST_TIMEOUT_MS = 1500
+function fakeRequestTimeouts() {
+	const pending = new Set()
+	const others = new Set() // the module's other timers, e.g. the poll batch's safety net
+	globalThis.setTimeout = (fn, ms, ...args) => {
+		if (ms !== REQUEST_TIMEOUT_MS) {
+			const timer = realSetTimeout(fn, ms, ...args)
+			others.add(timer)
+			return timer
+		}
+		const timer = { fn: () => fn(...args) }
+		pending.add(timer)
+		return timer
+	}
+	globalThis.clearTimeout = (timer) => (pending.delete(timer) ? undefined : realClearTimeout(timer))
+	return {
+		expire() {
+			for (const timer of [...pending]) {
+				pending.delete(timer)
+				timer.fn()
+			}
+		},
+		restore() {
+			// a batch that never completes would otherwise keep Node alive for a minute
+			for (const timer of others) realClearTimeout(timer)
+			globalThis.setTimeout = realSetTimeout
+			globalThis.clearTimeout = realClearTimeout
+		},
 	}
 }
 
@@ -35,6 +69,7 @@ class FakeCamera {
 	received = [] // hex of every frame the module sent
 	held = []
 	hold = false
+	answer = Infinity // requests beyond this many are held back
 	sockets = new Set()
 
 	async listen() {
@@ -50,7 +85,7 @@ class FakeCamera {
 					const frame = buf.subarray(0, idx + 1)
 					buf = buf.subarray(idx + 1)
 					this.received.push(hex(frame))
-					if (this.hold) this.held.push({ sock, frame })
+					if (this.hold || this.received.length > this.answer) this.held.push({ sock, frame })
 					else this.reply(sock, frame)
 				}
 			})
@@ -69,6 +104,7 @@ class FakeCamera {
 
 	release() {
 		this.hold = false
+		this.answer = Infinity
 		for (const { sock, frame } of this.held.splice(0)) this.reply(sock, frame)
 	}
 
@@ -149,6 +185,34 @@ test('startup poll queries exactly the once-tier inquiries and learns the camera
 			assert.equal(vars[q.varId], 'n/a', `${q.varId} after an error reply`)
 	} finally {
 		await inst.destroy()
+		await camera.close()
+	}
+})
+
+test('two unanswered requests downgrade to UnknownWarning, and a reply earns Ok back', async () => {
+	const camera = new FakeCamera()
+	camera.answer = 1 // the first request is answered, then the camera goes silent
+	await camera.listen()
+	const timeouts = fakeRequestTimeouts()
+	const inst = await connect(camera)
+	try {
+		await waitFor('Ok', () => statuses().includes('ok'))
+		await waitFor('the second request to reach the camera', () => camera.received.length === 2)
+
+		timeouts.expire()
+		await waitFor('the third request to reach the camera', () => camera.received.length === 3)
+		assert.ok(!statuses().includes('unknown_warning'), 'one timeout is not enough')
+
+		timeouts.expire()
+		await waitFor('the warning', () => statuses().includes('unknown_warning'))
+		const last = sent.findLast((m) => m.name === 'set-status')
+		assert.deepEqual(JSON.parse(last.payload), { status: 'unknown_warning', message: 'No response from camera' })
+
+		camera.release()
+		await waitFor('Ok again', () => statuses().at(-1) === 'ok')
+	} finally {
+		await inst.destroy()
+		timeouts.restore()
 		await camera.close()
 	}
 })
