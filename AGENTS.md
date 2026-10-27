@@ -38,18 +38,21 @@ All shipped module code lives in `src/` (Companion loads `src/entry.js`;
 
 ## Tests
 
-- `yarn test` → `node --test` (discovers `test/*.test.js`; pure unit tests, no
-  network or hardware). Single file: `node --test test/commands.test.js`;
-  single case: `node --test --test-name-pattern='<name>' test/commands.test.js`.
+- `yarn test` → `node --test` (discovers `test/*.test.js`; no hardware, no
+  external network). `test/main.test.js` runs the real `DctViscaInstance`
+  against a fake VISCA camera on loopback TCP: it stubs `process.send` (how
+  `InstanceBase` reports status/variables to Companion) and reads back what
+  Companion would have seen; serial probing is stubbed out. Single file:
+  `node --test test/commands.test.js`; single case: `node --test --test-name-pattern='<name>' test/commands.test.js`.
 - Unit tests assert table invariants with hard-coded counts and explicit
   exclusion lists (e.g. "exactly 37 `once:true` inquiries", "cam_power is not
   exposed"). Any change to `COMMANDS`/`INQUIRIES` likely requires updating
    those assertions plus `TESTPLAN.md` (hand-maintained, mirrors
    `COMMANDS`/`INQUIRIES` + `tools/provideo-names.mjs`) and possibly
    `tools/provideo-names.mjs`.
-- `yarn test:coverage` → `tools/coverage.mjs` (c8 over `node --test`, config in `.c8rc.json`: counts all of
-  `src/**`, so `main.js` shows as 0%; writes `coverage/cobertura-coverage.xml`,
-  which Jenkins publishes via `recordCoverage`, report-only).
+- `yarn test:coverage` → `tools/coverage.mjs` (c8 over `node --test`, config in `.c8rc.json`:
+  counts all of `src/**`, so files no test imports (`entry.js`) show as 0%; writes
+  `coverage/cobertura-coverage.xml`, which Jenkins publishes via `recordCoverage`, report-only).
 - Hardware test (not part of `yarn test`, needs a real serial camera):
   `VISCA_TEST_PORT=/dev/ttyUSB0 yarn test:hardware`. It resets camera
   settings before and after the run; destructive commands are skipped unless
