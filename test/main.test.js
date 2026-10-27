@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import net from 'node:net'
 
 import { DctViscaInstance } from '../src/main.js'
-import { INQUIRIES, TERMINATOR } from '../src/commands.js'
+import { COMMANDS, INQUIRIES, TERMINATOR } from '../src/commands.js'
 
 const realSetTimeout = setTimeout
 const realClearTimeout = clearTimeout
@@ -62,14 +62,16 @@ function fakeRequestTimeouts() {
 const hex = (b) => Buffer.from(b).toString('hex')
 
 // Answers `version` like an Atom Two (vendor 0x0020, model 0x0000, ROM
-// 0x0401, 2 sockets) and every other inquiry with a VISCA error reply, which
-// is just as terminal as a value. With `hold` set it receives requests but
-// stays silent until release().
+// 0x0401, 2 sockets), set commands with ACK + Completion, any frame listed in
+// `replies` (hex -> reply bytes) as given, and every other inquiry with a VISCA
+// error reply, which is just as terminal as a value. With `hold` set it
+// receives requests but stays silent until release().
 class FakeCamera {
 	received = [] // hex of every frame the module sent
 	held = []
 	hold = false
 	answer = Infinity // requests beyond this many are held back
+	replies = {}
 	sockets = new Set()
 
 	async listen() {
@@ -96,9 +98,10 @@ class FakeCamera {
 
 	reply(sock, frame) {
 		const isVersion = hex(frame) === hex(Buffer.from([0x81, ...INQUIRIES.version.payload, TERMINATOR]))
-		const out = isVersion
-			? [0x90, 0x50, 0x00, 0x20, 0x00, 0x00, 0x04, 0x01, 0x02, TERMINATOR]
-			: [0x90, 0x60, 0x02, TERMINATOR]
+		let out = [0x90, 0x60, 0x02, TERMINATOR]
+		if (isVersion) out = [0x90, 0x50, 0x00, 0x20, 0x00, 0x00, 0x04, 0x01, 0x02, TERMINATOR]
+		else if (this.replies[hex(frame)]) out = this.replies[hex(frame)]
+		else if (frame[1] === 0x01) out = [0x90, 0x41, TERMINATOR, 0x90, 0x51, TERMINATOR]
 		sock.write(Buffer.from(out))
 	}
 
@@ -134,11 +137,20 @@ function variables() {
 	return vars
 }
 
-async function connect(camera) {
+async function connect(camera, config = {}) {
 	sent = []
 	const inst = new DctViscaInstance({ _isInstanceBaseProps: true, id: 'test', upgradeScripts: [] })
 	inst.scanAndProbeSerialPorts = async () => {} // would enumerate real serial devices
-	await inst.init({ conn: 'tcp', host: '127.0.0.1', port: camera.port, address: 1, pollInterval: 0, knobStep: 4 })
+	inst.setActionDefinitions = (actions) => (inst.actions = actions) // keep the callbacks, Companion would call them
+	await inst.init({
+		conn: 'tcp',
+		host: '127.0.0.1',
+		port: camera.port,
+		address: 1,
+		pollInterval: 0,
+		knobStep: 4,
+		...config,
+	})
 	return inst
 }
 
@@ -213,6 +225,52 @@ test('two unanswered requests downgrade to UnknownWarning, and a reply earns Ok 
 	} finally {
 		await inst.destroy()
 		timeouts.restore()
+		await camera.close()
+	}
+})
+
+// AE Toggle writes its new state optimistically. If the SET errored or was
+// refused nothing would correct that, so with polling off the module reads the
+// mode back right away; with polling on the next poll cycle does that instead.
+const frameHex = (payload) => hex(Buffer.from([0x81, ...payload, TERMINATOR]))
+const SET_AE_MANUAL = frameHex(COMMANDS.cam_ae.choices.Manual)
+const ASK_AE_MODE = frameHex(INQUIRIES.ae_mode.payload)
+
+async function toggleAe(pollInterval) {
+	const camera = new FakeCamera()
+	// the camera is in Auto, whatever the optimistic toggle assumes
+	camera.replies[ASK_AE_MODE] = [0x90, 0x50, 0x00, TERMINATOR]
+	await camera.listen()
+	const inst = await connect(camera, { pollInterval })
+	await waitFor('Ok', () => statuses().includes('ok'))
+	await settled(inst)
+	camera.received.length = 0
+	inst.actions.cam_ae_toggle.callback({ options: {} })
+	return { camera, inst }
+}
+
+test('Poll ms 0: a toggle reads the real state back right after sending', async () => {
+	const { camera, inst } = await toggleAe(0)
+	try {
+		assert.equal(inst.pollTimer, undefined, 'send-only mode runs no poll timer')
+		await waitFor('the confirming inquiry', () => camera.received.length === 2)
+		assert.deepEqual(camera.received, [SET_AE_MANUAL, ASK_AE_MODE])
+		await waitFor('the camera state to replace the optimistic one', () => variables().ae_mode === 'FullAuto')
+	} finally {
+		await inst.destroy()
+		await camera.close()
+	}
+})
+
+test('polling on: a toggle only sends the command and leaves confirming to the poll', async () => {
+	const { camera, inst } = await toggleAe(2000)
+	try {
+		await waitFor('the command', () => camera.received.length >= 1)
+		await sleep(100) // an inquiry would follow at once
+		assert.deepEqual(camera.received, [SET_AE_MANUAL])
+		assert.equal(variables().ae_mode, 'Manual', 'the optimistic state stands until the next poll')
+	} finally {
+		await inst.destroy()
 		await camera.close()
 	}
 })
