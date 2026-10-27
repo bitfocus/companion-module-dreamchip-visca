@@ -7,12 +7,6 @@ Publishing goes through `tools/publish-release.sh` (see "Release process" in
 fields, so the old manual scrub steps (manifest URLs, README Cloning section,
 this file, `Jenkinsfile*`, `.github/`) are no longer needed. What is left:
 
-- [ ] Run the full `tools/publish-release.sh --dry-run <x.y.z>` once with
-      network (without `--no-install`): check that `yarn install`/`yarn package`
-      work with upstream's `.yarnrc.yml` (`enableScripts: false`) and the native
-      `serialport` bindings, and review the `yarn.lock` change.
-- [ ] Ask the Gerrit admin for a `release` branch in the project (needed for
-      `git push origin release:refs/for/release`).
 - [ ] Review the `## <version>` section of `CHANGELOG.md` (no ticket IDs); the
       script uses it as the release commit body.
 - [ ] Review the soft leak-check hits the script lists.

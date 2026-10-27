@@ -128,7 +128,9 @@ there.
 
 - Local `release` branch is rooted on `upstream/main` and never merged with
   `main`. It gets one `Release vX.Y.Z` commit per release. Create it once with
-  `git branch release upstream/main`.
+  `git branch release upstream/main`. It stays local and is not pushed to
+  Gerrit: the upstream template commit has a `noreply@github.com` committer,
+  which Gerrit rejects without the "Forge Committer" permission.
 - `remote.upstream.pushurl` is `DISABLED` and `remote.pushDefault` is `origin`,
   so a plain `git push` can't reach GitHub. Publishing uses an explicit URL.
 - `tools/publish-release.sh [--dry-run] [--no-install] <x.y.z>`
@@ -145,10 +147,11 @@ there.
   - runs `yarn install && yarn format && yarn package`, then a leak check (hard
     patterns such as `ATHDR`, `*.dreamchip.de`, `gerrit`, `AGENTS`, `Jenkins`
     fail the run; soft ones are only listed for review);
-  - commits to `release`, tags the Gerrit commit `vX.Y.Z-internal` locally, and
-    prints the push commands. It pushes nothing itself.
-- Flow: `--dry-run` first, then the real run, then
-  `git push origin release:refs/for/release` for review, and after approval push
+  - commits to `release`, creates the annotated tag `vX.Y.Z-internal`
+    (`git tag -a`) on the Gerrit commit locally, and prints the push commands
+    (push that tag to `origin` too). It pushes nothing itself.
+- Flow: `--dry-run` first, then the real run, then inspect the commit
+  (`git show --stat release`; the public tree has no Gerrit review), then push
   `release:main` plus the `vX.Y.Z` tag to the public URL and publish the GitHub
   release (its workflow packages the module).
 - `test/`, eslint/c8 config, `tools/`, the Jenkinsfiles and the internal docs

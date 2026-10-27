@@ -103,11 +103,12 @@ git -C "$work" commit -q -m "$msg"
 new=$(git -C "$work" rev-parse HEAD)
 git -C "$work" checkout -q --detach   # frees `release` for the branch update
 git branch -f release "$new"
-git tag "v$version-internal" "$src"
+git tag -a "v$version-internal" -m "Release v$version (public commit ${new:0:12})" "$src"
 
 cat <<MSG
 Created release $new (internal tag v$version-internal on ${src:0:12}).
-Review:   git push origin release:refs/for/release
+Review:   git show --stat release   (release stays local, it is not pushed to Gerrit)
+Internal: git push origin v$version-internal
 Publish:  git push <public-url> release:main
-          git tag v$version release && git push <public-url> v$version
+          git tag -a v$version -m "Release v$version" release && git push <public-url> v$version
 MSG
