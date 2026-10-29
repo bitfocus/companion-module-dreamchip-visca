@@ -848,9 +848,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"companion-module-dct-visca@workspace:.":
+"companion-module-dreamchip-visca@workspace:.":
   version: 0.0.0-use.local
-  resolution: "companion-module-dct-visca@workspace:."
+  resolution: "companion-module-dreamchip-visca@workspace:."
   dependencies:
     "@companion-module/base": "npm:~1.11.0"
     "@companion-module/tools": "npm:>=2.1.0 <2.4.0"
