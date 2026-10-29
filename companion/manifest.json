@@ -1,11 +1,11 @@
 {
-  "id": "dct-visca",
-  "name": "dct-visca",
+  "id": "dreamchip-visca",
+  "name": "dreamchip-visca",
   "shortname": "VISCA",
   "description": "Control Dream Chip cameras over VISCA",
   "version": "0.8.0",
   "license": "MIT",
-  "repository": "git+https://github.com/bitfocus/companion-module-dreamchip-visca.git",
+  "repository": "https://github.com/bitfocus/companion-module-dreamchip-visca.git",
   "bugs": "https://github.com/bitfocus/companion-module-dreamchip-visca/issues",
   "maintainers": [
     {

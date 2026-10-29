@@ -1,4 +1,4 @@
-# companion-module-dct-visca
+# companion-module-dreamchip-visca
 
 A Bitfocus Companion v4 module to control Dream Chip cameras over **VISCA**.
 It sends VISCA commands as raw bytes over TCP and reads camera state back via
