@@ -1,6 +1,6 @@
 {
   "name": "companion-module-dreamchip-visca",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "main": "src/entry.js",
   "description": "Control Dream Chip cameras over VISCA",
