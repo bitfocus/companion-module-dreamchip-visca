@@ -24,14 +24,14 @@ Run/Hold, AE Auto/Manual, WB Auto/Manual). Pan/tilt/zoom/focus are out of scope.
 
 In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
 
-| Field | Description |
-|---|---|
-| **Connection** | `TCP` or `Serial (COM)` |
-| **Target IP** / **TCP port** | TCP mode: the camera's IP and VISCA TCP port (default `4000`) |
-| **Serial port** / **Baud** | Serial mode: the COM port (e.g. `COM3` or `/dev/ttyUSB0`) and baud (default `115200`). Run Companion on the machine physically wired to the camera |
-| **Camera address** | VISCA address `1`–`7` (default `1`) |
-| **Poll ms** | Read-back polling interval in ms; `0` = off (send-only), otherwise a **minimum of `2000`** (faster values are automatically raised to 2000). Only the "live" tier is repeated on this interval -- calibration/setup-style values (LUT, filters, CNR, SDI, gamma, black levels, flare, audio, etc.) are read once per connection instead; use "System: Poll startup values now" to re-sync them on demand |
-| **Knob step** | Turn increment for rotary-knob presets on `0`–`255` params (default `4`); `0`–`15` params always step by 1 |
+| Field                        | Description                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Connection**               | `TCP` or `Serial (COM)`                                                                                                                                                                                                                                                                                                                                                                                  |
+| **Target IP** / **TCP port** | TCP mode: the camera's IP and VISCA TCP port (default `4000`)                                                                                                                                                                                                                                                                                                                                            |
+| **Serial port** / **Baud**   | Serial mode: the COM port (e.g. `COM3` or `/dev/ttyUSB0`) and baud (default `115200`). Run Companion on the machine physically wired to the camera                                                                                                                                                                                                                                                       |
+| **Camera address**           | VISCA address `1`–`7` (default `1`)                                                                                                                                                                                                                                                                                                                                                                      |
+| **Poll ms**                  | Read-back polling interval in ms; `0` = off (send-only), otherwise a **minimum of `2000`** (faster values are automatically raised to 2000). Only the "live" tier is repeated on this interval -- calibration/setup-style values (LUT, filters, CNR, SDI, gamma, black levels, flare, audio, etc.) are read once per connection instead; use "System: Poll startup values now" to re-sync them on demand |
+| **Knob step**                | Turn increment for rotary-knob presets on `0`–`255` params (default `4`); `0`–`15` params always step by 1                                                                                                                                                                                                                                                                                               |
 
 ## What it exposes
 
@@ -47,7 +47,8 @@ In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
     the knob presets, but also assignable to any button).
 - **Presets** — a button per command choice, grouped by category (System,
   Exposure, White Balance, Audio, and Video Modes), plus **rotary-knob
-  presets** (see below), grouped under `Knobs: …`.
+  presets** (see below), each in its parameter's own category and named
+  `<parameter> (knob)`.
 - **Variables** — one per inquiry, updated by the poller, e.g. `$(visca:wb_mode)`,
   `$(visca:ae_mode)`, `$(visca:gain)`, `$(visca:version)`. The prefix is your
   connection's label.
@@ -59,12 +60,17 @@ In Companion, add a **"Dream Chip Technologies: VISCA"** connection and set:
 
 Every continuous parameter (gain, shutter, red/blue/green gain, black master/R/G/B,
 flare, S-Log3 gain, SDI black/white, brightness, contrast, audio gain, …) has a
-ready-made **rotary-encoder preset** under the `Knobs: <group>` categories:
+ready-made **rotary-encoder preset**, named `<parameter> (knob)` and listed in
+the parameter's own preset category (Exposure, White Balance, System or Audio):
 
 - **Turn right / left** → increase / decrease the value by the **Knob step**
   (0–15 params step by 1). It sends an absolute `direct` set and updates the value
   immediately, so it works even with polling off.
-- **Press** → re-reads the camera to re-sync the knob to the real value.
+- **Press** → for most knobs, re-reads the camera to re-sync the knob to the real
+  value. **Twelve knobs change the camera instead**: Gain, Shutter, Red/Green/Blue
+  Gain and Bright send the camera's own **Reset**; Color Hue is set to 0°, Color
+  Gain and Contrast to 1.0x (128), Color Temp to 6500 K, Audio Gain to 0 dB and
+  LUT Fast Gamma to 2.204.
 - The **encoder LCD** shows the parameter name, its current value, and a text
   progress bar (e.g. `...|......`) marking its position within its range,
   over a generated ring background (`images.js` — no image dependency, drawn
@@ -79,7 +85,7 @@ ready-made **rotary-encoder preset** under the `Knobs: <group>` categories:
 
 Drag a knob preset onto a Stream Deck+ encoder (or an encoder in the web/emulator
 surface). To build your own, enable **Rotary Actions** on a button and map
-*rotate right/left* to **"Knob: Adjust value (relative)"** with a positive/negative
+_rotate right/left_ to **"Knob: Adjust value (relative)"** with a positive/negative
 step. Companion has no on-screen fader; an absolute fader would come from an external
 MIDI/Satellite surface writing a variable that drives a "direct" set action.
 

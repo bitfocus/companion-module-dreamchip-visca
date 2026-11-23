@@ -295,7 +295,7 @@ export const COMMANDS = {
 	// value, step by ~109 gain units -- the same "10 raw nibble-steps' worth"
 	// density as the Red/Blue/Green Gain controls' step -- clamp to
 	// 1000-45715, resend).
-	cam_gain: { name: 'Gain', group: 'Exposure', kind: 'rud', func: 0x0c },
+	cam_gain: { actionName: 'Gain (Reset/Up/Down)', name: 'Gain', group: 'Exposure', kind: 'rud', func: 0x0c },
 	// cam_gain's real range is 1000-45715 (1x/0dB/140 ISO min; max is the
 	// top of the camera's gain range); widened to 3
 	// nibbles (0-4095) for ~10.9 gain units per step, matching the camera
@@ -319,13 +319,20 @@ export const COMMANDS = {
 	// to the SAME wire command as cam_gain_direct (01 04 4C
 	// ...) via the GAIN_ISO table above. Purely additive -- the raw
 	// cam_gain_direct number control is left untouched for manual/precise entry.
-	cam_gain_iso: { name: 'Gain', group: 'Exposure', kind: 'iso', prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00), nibbles: 3 },
+	cam_gain_iso: {
+		actionName: 'Gain (ISO)',
+		name: 'Gain',
+		group: 'Exposure',
+		kind: 'iso',
+		prefix: P(0x01, 0x04, 0x4c, 0x00, 0x00),
+		nibbles: 3,
+	},
 	// Reset/Up/Down is the standard VISCA CAM_Shutter structure. Up/Down are a
 	// firmware-side read-modify-write of cam_exposure's real value (query
 	// current value, step by ~93us -- the same "10 raw nibble-steps' worth"
 	// density as the Red/Blue/Green Gain controls' step -- clamp to
 	// 100-38339us, resend).
-	cam_shutter: { name: 'Shutter', group: 'Exposure', kind: 'rud', func: 0x0a },
+	cam_shutter: { actionName: 'Shutter (Reset/Up/Down)', name: 'Shutter', group: 'Exposure', kind: 'rud', func: 0x0a },
 	// cam_exposure's real range is 100-38339us (observed on real hardware);
 	// widened to 3 nibbles (0-4095) for ~9.3us per step, matching the camera
 	// firmware.
@@ -353,6 +360,7 @@ export const COMMANDS = {
 	// SHUTTER_SPEEDS table above. Purely additive -- the raw cam_shutter_direct
 	// number control is left untouched for manual/precise entry.
 	cam_shutter_speed: {
+		actionName: 'Shutter (Speed)',
 		name: 'Shutter',
 		group: 'Exposure',
 		kind: 'shutter',
@@ -506,7 +514,7 @@ export const COMMANDS = {
 		signed: true,
 	},
 	// Contrast's real factory default/neutral is 128 (0x80, "1.0x" -- see
-	// KNOB_PRESS_SET_VALUE in main.js), not the wire's own 0. This is a
+	// KNOB_PRESS_SET_VALUE in constants.js), not the wire's own 0. This is a
 	// display-only offset (raw - 128), NOT `signed: true` -- that flag is a
 	// two's-complement reinterpretation (raw 0 stays 0, negative wraps from
 	// the TOP of the wire range), which would give the wrong mapping here
@@ -675,6 +683,7 @@ export const COMMANDS = {
 	// `max` narrows the Companion-side UI/knob range from the
 	// wire's full 1-nibble 0-15 capacity.
 	dct_color_space: {
+		actionName: 'Color Space (direct)',
 		name: 'Color Space',
 		group: 'System',
 		kind: 'direct',
@@ -699,6 +708,7 @@ export const COMMANDS = {
 	// excluded no longer applies -- current firmware implements mode 0 as a
 	// proper identity tone curve.
 	dct_tm_mode: {
+		actionName: 'Tone Mapping Mode (direct)',
 		name: 'Tone Mapping Mode',
 		group: 'System',
 		kind: 'direct',

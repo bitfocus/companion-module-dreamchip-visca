@@ -29,17 +29,17 @@ Setup-style values (LUT, filters, black levels, SDI, audio, …) are read once p
 
 ## Actions, presets, variables
 
-- **Actions** cover System, Exposure, White Balance, Picture, Video Mode and Audio, plus Dream Chip extensions (black levels, flare, noise reduction, LUT, SDI, timecode, …). Enums are dropdowns, "direct" actions take a value, and Gain and Shutter offer named steps (ISO, 1/n).
-- **Presets** are grouped by category, plus rotary-knob presets under `Knobs: …`.
+- **Actions** cover System (including gamma, brightness, contrast and flip), Exposure, White Balance, Video Modes and Audio, plus Dream Chip extensions (black levels, flare, noise reduction, LUT, SDI, timecode, …). Enums are dropdowns, "direct" actions take a value, and Gain and Shutter offer named steps (ISO, 1/n).
+- **Presets** are grouped by category, plus rotary-knob presets. Each knob preset sits in its parameter's own category (Exposure, White Balance, System or Audio) and is named `<parameter> (knob)`, e.g. `Gain (knob)`.
 - **Variables** hold the camera state read back by the poller, e.g. `$(label:ae_mode)`, `$(label:wb_mode)`, `$(label:gain)`, `$(label:version)`. `label` is the name of your connection.
 - **Feedbacks**: AE mode is …, WB mode is …, Connection OK, and **Knob: show current value**.
 
 ## Knobs (Stream Deck+)
 
-Every continuous parameter has a ready-made encoder preset under `Knobs: <group>`:
+Every continuous parameter has a ready-made encoder preset, named `<parameter> (knob)` and listed in the parameter's own preset category (Exposure, White Balance, System or Audio):
 
 - **Turn** right/left: raises/lowers the value by the Knob step and sends it immediately, so it also works with polling off.
-- **Press**: re-reads the camera to re-sync the knob.
+- **Press**: most knobs re-read the camera to re-sync. Twelve knobs **change the camera** instead, so don't press them on air just to re-sync: Gain, Shutter, Red/Green/Blue Gain and Bright send the camera's own **Reset**; Color Hue is set to 0°, Color Gain and Contrast to 1.0x (128), Color Temp to 6500 K, Audio Gain to 0 dB and LUT Fast Gamma to 2.204. To re-sync without changing anything, use **System: Poll inquiries now**.
 - The encoder display shows the name, the current value and a position bar. Values are shown in natural units: ISO for gain, µs for shutter, dB for audio gain, Kelvin for colour temperature, degrees for hue, and a factor (`x`) for colour gains. Gain and shutter step in stops.
 
 To build your own, enable **Rotary Actions** on a button and map rotate left/right to **Knob: Adjust value (relative)** with a negative/positive step.

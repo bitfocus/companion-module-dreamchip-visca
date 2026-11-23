@@ -1,35 +1,31 @@
 {
-  "id": "dreamchip-visca",
-  "name": "dreamchip-visca",
-  "shortname": "VISCA",
-  "description": "Control Dream Chip cameras over VISCA",
-  "version": "0.8.0",
-  "license": "MIT",
-  "repository": "https://github.com/bitfocus/companion-module-dreamchip-visca.git",
-  "bugs": "https://github.com/bitfocus/companion-module-dreamchip-visca/issues",
-  "maintainers": [
-    {
-      "name": "atom-visca-support",
-      "email": "atom-visca-support@dreamchip.de"
-    }
-  ],
-  "legacyIds": [],
-  "runtime": {
-    "type": "node22",
-    "api": "nodejs-ipc",
-    "apiVersion": "1.11.3",
-    "entrypoint": "../src/entry.js",
-    "universal": true
-  },
-  "manufacturer": "Dream Chip Technologies",
-  "products": [
-    "VISCA"
-  ],
-  "keywords": [
-    "camera",
-    "visca",
-    "dct",
-    "dreamchip",
-    "provideo"
-  ]
+	"$schema": "../node_modules/@companion-module/base/assets/manifest.schema.json",
+	"id": "dreamchip-visca",
+	"name": "dreamchip-visca",
+	"shortname": "VISCA",
+	"description": "Control Dream Chip cameras over VISCA",
+	"version": "0.0.0",
+	"license": "MIT",
+	"repository": "git+https://github.com/bitfocus/companion-module-dreamchip-visca.git",
+	"bugs": "https://github.com/bitfocus/companion-module-dreamchip-visca/issues",
+	"maintainers": [
+		{
+			"name": "atom-visca-support",
+			"email": "atom-visca-support@dreamchip.de"
+		}
+	],
+	"legacyIds": [],
+	"runtime": {
+		"type": "node22",
+		"api": "nodejs-ipc",
+		"apiVersion": "1.14.1",
+		"entrypoint": "../src/entry.js",
+		"universal": true,
+		"permissions": {
+			"native-addons": true
+		}
+	},
+	"manufacturer": "Dream Chip Technologies",
+	"products": ["Atom Two", "Atom Two HDR"],
+	"keywords": ["camera", "visca", "dct", "dreamchip", "provideo", "atom"]
 }
